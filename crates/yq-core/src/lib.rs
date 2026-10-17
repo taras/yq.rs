@@ -1,11 +1,25 @@
 //! yq-core: the yq expression language, evaluated over a YAML/JSON node tree.
 //!
 //! The crate is a port of `pkg/yqlib` from <https://github.com/mikefarah/yq>.
-//! `docs/design.md` describes the architecture; `PLAN.md` the build order.
+//! `README.md` describes the architecture and current compatibility gaps.
 //! Conformance is measured by `tests/conformance.rs` against the scenarios
 //! extracted from yq's own test suite in `tests/fixtures/scenarios.json`.
 
+extern crate alloc;
+
 pub mod conformance;
+pub mod context;
+pub mod eval;
+pub mod json;
+pub mod lexer;
+pub mod node;
+pub mod operation;
+pub mod ops;
+pub mod parser;
+pub mod postfix;
+pub mod printer;
+pub mod util;
+pub mod yaml;
 
 /// Input and output serialisation formats the engine understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +41,12 @@ pub struct EvalOptions {
     pub env: Vec<(String, String)>,
     /// RFC 3339 timestamp returned by `now`. `None` makes `now` an error.
     pub now: Option<String>,
+    /// File contents for `load`, `load_str`, `load_props` and
+    /// `load_base64`, keyed by the exact path an expression will use.
+    pub files: Vec<(String, String)>,
+    /// Print scalar results bare, without quotes, styles or comments (yq's
+    /// `-r`). `None` follows yq's default: on for YAML output, off for JSON.
+    pub unwrap_scalar: Option<bool>,
 }
 
 impl Default for EvalOptions {
@@ -38,6 +58,8 @@ impl Default for EvalOptions {
             null_input: false,
             env: Vec::new(),
             now: None,
+            files: Vec::new(),
+            unwrap_scalar: None,
         }
     }
 }
@@ -56,8 +78,31 @@ impl std::error::Error for Error {}
 /// Evaluates `expression` against `input` and returns the printed results, the
 /// way `yq eval` prints them to stdout.
 pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<String, Error> {
-    let _ = (expression, input, options);
-    Err(Error(
-        "yq-core: evaluate is not implemented yet (see PLAN.md milestone 1)".to_string(),
-    ))
+    let mut arena = node::Arena::new();
+    let inputs = if options.null_input {
+        vec![arena.push(node::Node::scalar("!!null", ""))]
+    } else {
+        match options.input_format {
+            Format::Yaml => yaml::decode::decode_documents(&mut arena, input, "", 0)?,
+            Format::Json => json::decode::decode_documents(&mut arena, input)?,
+        }
+    };
+    let parsed = parser::parse_expression(expression)?;
+    let mut evaluator = eval::Evaluator::new(arena);
+    evaluator.env = options.env.clone();
+    evaluator.now = options.now.clone();
+    evaluator.files = options.files.clone();
+    let results =
+        evaluator.get_matching_nodes_opt(context::Context::new(inputs), parsed.as_ref())?;
+    let mut printer = printer::Printer::new(printer::PrinterPrefs {
+        format: options.output_format,
+        indent: options.indent,
+        unwrap_scalar: options
+            .unwrap_scalar
+            .unwrap_or(options.output_format == Format::Yaml),
+        print_doc_separators: true,
+    });
+    let nodes = results.nodes().to_vec();
+    printer.print_results(&mut evaluator.arena, &nodes)?;
+    Ok(printer.into_output())
 }

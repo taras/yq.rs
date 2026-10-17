@@ -13,6 +13,13 @@ export interface EvalOptions {
   env?: Record<string, string>;
   /** RFC 3339 timestamp returned by `now`. */
   now?: string;
+  /** Contents for `load(path)` and friends, keyed by the exact path used. */
+  files?: Record<string, string>;
+  /**
+   * Print scalar results bare, without quotes or comments (yq's `-r`).
+   * Defaults to true for YAML output and false for JSON, as yq does.
+   */
+  unwrapScalar?: boolean;
 }
 
 export interface Yq {

@@ -45,6 +45,22 @@ fn load_scenarios() -> Vec<RawScenario> {
     serde_json::from_str(&data).expect("parse scenarios.json")
 }
 
+/// The example files `load` scenarios read, under the relative path the Go
+/// tests use (`../../examples/<name>` from `pkg/yqlib`).
+fn load_example_files() -> Vec<(String, String)> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/examples");
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Ok(contents) = std::fs::read_to_string(entry.path()) {
+                files.push((format!("../../examples/{name}"), contents));
+            }
+        }
+    }
+    files
+}
+
 fn read_baseline() -> usize {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -62,10 +78,11 @@ fn conformance() {
     let group_filter = std::env::var("YQ_CONFORMANCE_GROUP").ok();
     let verbose = std::env::var("YQ_CONFORMANCE_VERBOSE").is_ok();
     let scenarios = load_scenarios();
+    let example_files = load_example_files();
 
     let mut passed = 0usize;
     let mut skipped = 0usize;
-    let mut failures: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut failures: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     let mut per_group: BTreeMap<String, (usize, usize)> = BTreeMap::new();
 
     for raw in &scenarios {
@@ -95,6 +112,7 @@ fn conformance() {
                 .unwrap_or_default()
                 .into_iter()
                 .collect(),
+            files: example_files.clone(),
         };
         let entry = per_group.entry(raw.group.clone()).or_insert((0, 0));
         entry.1 += 1;
@@ -113,31 +131,44 @@ fn conformance() {
             let mut detail = String::new();
             let _ = writeln!(detail, "[{}] {}", raw.group, raw.description);
             let _ = writeln!(detail, "  expression: {}", raw.expression);
-            if verbose {
-                let _ = writeln!(detail, "  document:   {:?}", raw.document);
-                if raw.expected_error.is_empty() {
-                    let _ = writeln!(detail, "  expected:   {:?}", expected);
-                } else {
-                    let _ = writeln!(detail, "  expected error: {:?}", raw.expected_error);
-                }
-                let _ = writeln!(detail, "  actual:     {:?}", outcome);
+            // The report file always carries the full detail; stdout only
+            // does so when asked, to keep test output readable.
+            let mut full = detail.clone();
+            let _ = writeln!(full, "  document:   {:?}", raw.document);
+            if !raw.document2.is_empty() {
+                let _ = writeln!(full, "  document2:  {:?}", raw.document2);
             }
-            failures.entry(raw.group.clone()).or_default().push(detail);
+            if raw.expected_error.is_empty() {
+                let _ = writeln!(full, "  expected:   {:?}", expected);
+            } else {
+                let _ = writeln!(full, "  expected error: {:?}", raw.expected_error);
+            }
+            let _ = writeln!(full, "  actual:     {:?}", outcome);
+            if verbose {
+                detail = full.clone();
+            }
+            failures
+                .entry(raw.group.clone())
+                .or_default()
+                .push((detail, full));
         }
     }
 
     let total = passed + failures.values().map(Vec::len).sum::<usize>();
-    let mut report = String::new();
+    let mut summary = String::new();
     let _ = writeln!(
-        report,
+        summary,
         "conformance: {passed}/{total} passed, {skipped} skipped"
     );
     for (group, (ok, count)) in &per_group {
-        let _ = writeln!(report, "  {group}: {ok}/{count}");
+        let _ = writeln!(summary, "  {group}: {ok}/{count}");
     }
+    let mut report = summary.clone();
+    let mut printed = summary;
     for details in failures.values() {
-        for detail in details {
-            report.push_str(detail);
+        for (detail, full) in details {
+            printed.push_str(detail);
+            report.push_str(full);
         }
     }
     let report_path = concat!(
@@ -148,7 +179,7 @@ fn conformance() {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(report_path, &report);
-    println!("{report}");
+    println!("{printed}");
 
     if group_filter.is_some() {
         return;

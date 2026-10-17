@@ -1,7 +1,7 @@
 # Conformance fixture
 
 `scenarios.json` holds every `expressionScenario` from the Go yq test suite,
-dumped verbatim by `scripts/extract-scenarios.sh`. It is the specification
+exported verbatim from the pinned commit below. It is the specification
 yq.rs is built against. Do not edit it by hand; regenerate it from a newer yq
 if needed and record the commit here.
 

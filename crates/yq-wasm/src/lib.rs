@@ -1,6 +1,6 @@
 //! Hand-written wasm ABI. No wasm-bindgen, so the module loads with
 //! `WebAssembly.instantiate` alone in Deno, Bun, Node and browsers.
-//! `docs/design.md` has the contract; `js/yq.ts` is the reference loader.
+//! `README.md` has the contract; `js/yq.ts` is the reference loader.
 //!
 //! Memory protocol:
 //! - host calls `yq_alloc(len)` and writes UTF-8 bytes for each argument
@@ -87,7 +87,7 @@ unsafe fn read_str<'a>(ptr: *const u8, len: u32) -> &'a str {
 }
 
 /// Options arrive as a tiny JSON object. A dedicated parser keeps serde out of
-/// the wasm binary; the keys are documented in `docs/design.md`.
+/// the wasm binary; the keys are documented in `README.md`.
 fn parse_options(json: &str) -> Result<EvalOptions, String> {
     let mut options = EvalOptions::default();
     let trimmed = json.trim();
@@ -102,8 +102,10 @@ fn parse_options(json: &str) -> Result<EvalOptions, String> {
                 options.indent = value.parse().map_err(|_| format!("bad indent: {value}"))?
             }
             "nullInput" => options.null_input = value == "true",
+            "unwrapScalar" => options.unwrap_scalar = Some(value == "true"),
             "now" => options.now = Some(value),
             "env" => options.env = flat_json_pairs(&value)?,
+            "files" => options.files = flat_json_pairs(&value)?,
             other => return Err(format!("unknown option: {other}")),
         }
     }
