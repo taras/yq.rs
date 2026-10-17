@@ -25,6 +25,15 @@ lock['packages']['']['optionalDependencies'] = json.loads((ROOT / 'package.json'
 for name in list(lock['packages']):
     if name.startswith('node_modules/yq.rs-'):
         del lock['packages'][name]
+for path in sorted((ROOT / 'npm').glob('*/package.json')):
+    package = json.loads(path.read_text())
+    name = package['name']
+    lock['packages'][f'node_modules/{name}'] = {
+        'version': version,
+        'resolved': f'https://registry.npmjs.org/{name}/-/{name}-{version}.tgz',
+        'optional': True,
+        **{key: package[key] for key in ['os', 'cpu', 'license', 'libc'] if key in package},
+    }
 lock_path.write_text(json.dumps(lock, indent=2) + '\n')
 subprocess.run(['cargo', 'update', '--workspace', '--offline'], cwd=ROOT, check=True)
 subprocess.run([sys.executable, str(ROOT / '.github/release/verify.py'), 'metadata'], cwd=ROOT, check=True)

@@ -25,7 +25,8 @@ command = npm + ['exec', '--', 'napi', 'build', '--platform', '--release', '--ma
 if platform['os'] == 'linux':
     command.insert(command.index('--platform'), '--cross-compile')
 subprocess.run(command, cwd=ROOT, env=env, check=True)
-addon = ROOT / 'target/napi' / f"yq.{platform['id']}.node"
+addon_suffix = platform['id'] + ('-msvc' if platform['os'] == 'win32' else '')
+addon = ROOT / 'target/napi' / f'yq.{addon_suffix}.node'
 if not target.endswith('-musl'):
     subprocess.run(['node', '-e', 'const a = require(process.argv[1]); if (a.evaluate(".name", "name: Ada\\n").output !== "Ada\\n") { throw Error("addon smoke failed"); }', str(addon)], check=True)
 build_package(platform['id'], addon, addon=True)

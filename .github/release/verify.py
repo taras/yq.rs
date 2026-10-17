@@ -48,6 +48,9 @@ def metadata():
             if package['os'] != [platform['os']] or package['cpu'] != [platform['cpu']] or package.get('libc') != ([platform['libc']] if platform.get('libc') else None):
                 raise SystemExit(f"Native package platform differs: {name}")
             expected_optional[name] = version
+            locked = lock['packages'].get(f'node_modules/{name}', {})
+            if locked.get('version') != version or not locked.get('optional'):
+                raise SystemExit(f'Native lockfile entry differs: {name}')
     if npm.get('optionalDependencies') != expected_optional or lock['packages'][''].get('optionalDependencies') != expected_optional:
         raise SystemExit('Native optional dependencies must match the workspace version exactly')
     tag = os.environ.get("RELEASE_TAG", "")
