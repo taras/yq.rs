@@ -19,7 +19,15 @@ await copyFile(new URL("./yq.wasm", import.meta.url), new URL("../dist/yq.wasm",
 await writeFile(new URL("../dist/inline.js", import.meta.url), `import { createYq as instantiate } from "./yq.js";
 export { YqError } from "./yq.js";
 
-const bytes = Uint8Array.from(atob("${wasm.toString("base64")}"), character => character.charCodeAt(0));
+const encoded = "${wasm.toString("base64")}";
+// Native decoders take well under a millisecond; the atob loop over half a
+// million characters costs about 30 ms and is kept only as the last resort.
+const bytes =
+  typeof Uint8Array.fromBase64 === "function"
+    ? Uint8Array.fromBase64(encoded)
+    : typeof Buffer === "function"
+      ? new Uint8Array(Buffer.from(encoded, "base64"))
+      : Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
 const module = WebAssembly.compile(bytes);
 
 export async function createYq() {

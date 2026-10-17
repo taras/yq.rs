@@ -53,6 +53,8 @@ await createYq(new Uint8Array());
     stdio: "inherit",
   });
   const metadata = JSON.parse(await readFile(join(fixture, "node_modules/yq.rs/package.json"), "utf8"));
+  // No CLI yet; https://github.com/taras/yq.rs/issues/6 adds a `yq` bin and
+  // replaces this assertion with checks on it.
   assert.equal(metadata.bin, undefined);
   for (const runtime of runtimes) {
     execFileSync(runtime === "node" ? process.execPath : runtime, [join(fixture, "smoke.mjs")], {
