@@ -9,9 +9,16 @@ out of 1,111 runnable (1,121 in the fixture, 10 skipped for XML/JSON-only
 decoders). Record the count at each milestone.
 
 Status on 2026-10-17: 1,107 of 1,111 pass. Every milestone below is done;
-the only open items are `shuffle` (4 scenarios, needs Go's `math/rand`
-sequence) and running `js/smoke.ts` under Bun and Node, which were not
-installed on the build machine.
+the only open fixture item is `shuffle` (4 scenarios, needs Go's `math/rand`
+sequence). `js/smoke.ts` passes under Deno, Bun and Node.
+
+Beyond the fixture, `crates/yq-core/tests/regressions.rs` covers behaviour
+found by diffing against the Go binary at the pinned commit (build it with
+`go build -o ref/yq-ref ./ref/yq`): line comments after quoted scalars,
+flow collections closing at the parent's column, and `-r`/`unwrapScalar`
+defaulting on for YAML output and off for JSON. Known remaining
+difference: go-yaml accepts `a: "x"#c` (comment without a separating
+space); the scanner rejects it.
 
 ## Milestones
 

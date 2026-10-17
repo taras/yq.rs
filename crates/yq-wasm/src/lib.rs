@@ -102,6 +102,7 @@ fn parse_options(json: &str) -> Result<EvalOptions, String> {
                 options.indent = value.parse().map_err(|_| format!("bad indent: {value}"))?
             }
             "nullInput" => options.null_input = value == "true",
+            "unwrapScalar" => options.unwrap_scalar = Some(value == "true"),
             "now" => options.now = Some(value),
             "env" => options.env = flat_json_pairs(&value)?,
             "files" => options.files = flat_json_pairs(&value)?,

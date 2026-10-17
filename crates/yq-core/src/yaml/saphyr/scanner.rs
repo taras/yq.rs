@@ -2322,19 +2322,28 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.disallow_simple_key();
 
         let tok = self.scan_flow_scalar(single)?;
+        let token_mark = tok.0.start;
+        self.tokens.push_back(tok);
+
+        // go-yaml attaches a same-line `# comment` to the scalar before any
+        // whitespace is skipped. The adjacent-value skip below would otherwise
+        // consume it as a head comment of whatever follows.
+        self.scan_line_comment(token_mark)?;
 
         // From spec: To ensure JSON compatibility, if a key inside a flow mapping is JSON-like,
         // YAML allows the following value to be specified adjacent to the “:”.
         let scan_mark = self.mark;
         self.skip_to_next_token(scan_mark)?;
         self.adjacent_value_allowed_at = self.mark.index;
-
-        self.tokens.push_back(tok);
         Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
     fn scan_flow_scalar(&mut self, single: bool) -> Result<Token<'input>, ScanError> {
+        // Like `scan_plain_scalar`: drop the one-column flow indent so a
+        // closing `]` or `}` at the parent's column is accepted, as go-yaml
+        // does for `a: {"k": "v"\n}`.
+        self.unroll_non_block_indents();
         let start_mark = self.mark;
 
         let mut string = String::new();
@@ -2439,13 +2448,25 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         // Eat the right quote.
         self.skip_non_blank();
-        // Ensure there is no invalid trailing content.
-        self.skip_ws_to_eol(SkipTabs::Yes)?;
-        match self.input.peek() {
+        // Ensure there is no invalid trailing content. Only peek past the
+        // blanks: a trailing `# comment` has to stay in the input so that
+        // `fetch_flow_scalar` can attach it to this scalar as a line comment.
+        let mut peek = 0usize;
+        loop {
+            self.input.lookahead(peek + 1);
+            if is_blank(self.input.peek_nth(peek)) {
+                peek += 1;
+            } else {
+                break;
+            }
+        }
+        match self.input.peek_nth(peek) {
             // These can be encountered in flow sequences or mappings.
             ',' | '}' | ']' if self.flow_level > 0 => {}
             // An end-of-line / end-of-stream is fine. No trailing content.
             c if is_breakz(c) => {}
+            // A comment, which must be separated from the quote by whitespace.
+            '#' if peek > 0 => {}
             // ':' can be encountered if our scalar is a key.
             // Outside of flow contexts, keys cannot span multiple lines
             ':' if self.flow_level == 0 && start_mark.line == self.mark.line => {}

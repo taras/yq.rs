@@ -3,7 +3,7 @@
 //! Deliberately tiny: it exists so `scripts/diff-against-yq.sh` can compare
 //! yq-core with the reference Go yq on the same input. It is not the product.
 //! Flags mirror the yq ones they copy: -p/--input-format, -o/--output-format,
-//! -I/--indent, -n/--null-input.
+//! -I/--indent, -n/--null-input, -r/--unwrapScalar.
 
 use std::io::Read;
 use yq_core::{EvalOptions, Format};
@@ -35,11 +35,13 @@ fn main() {
                 options.indent = args.next().and_then(|v| v.parse().ok()).unwrap_or(2)
             }
             "-n" | "--null-input" => options.null_input = true,
+            "-r" | "--unwrapScalar" | "--unwrapScalar=true" => options.unwrap_scalar = Some(true),
+            "-r=false" | "--unwrapScalar=false" => options.unwrap_scalar = Some(false),
             _ => positional.push(arg),
         }
     }
     if positional.is_empty() {
-        eprintln!("usage: yq-rs [-p fmt] [-o fmt] [-I n] [-n] <expression> [file]");
+        eprintln!("usage: yq-rs [-p fmt] [-o fmt] [-I n] [-n] [-r[=false]] <expression> [file]");
         std::process::exit(2);
     }
     let expression = positional.remove(0);

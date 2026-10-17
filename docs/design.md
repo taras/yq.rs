@@ -135,6 +135,7 @@ Options are a JSON object:
 | `outputFormat` | `"yaml"` or `"json"` | `"yaml"` | |
 | `indent` | number | 2 | Output indent. |
 | `nullInput` | boolean | false | Evaluate against a single null document. |
+| `unwrapScalar` | boolean | true for yaml, false for json | Print scalar results bare, without quotes, styles or comments (yq's `-r`). |
 | `env` | object of strings | `{}` | Values for `env`, `strenv`, `envsubst`. |
 | `now` | RFC 3339 string | unset | Value of `now`. Unset makes `now` an error. |
 | `files` | object of strings | `{}` | Contents for `load`, `load_str`, `load_props` and `load_base64`, keyed by the exact path the expression uses. |

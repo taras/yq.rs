@@ -44,6 +44,9 @@ pub struct EvalOptions {
     /// File contents for `load`, `load_str`, `load_props` and
     /// `load_base64`, keyed by the exact path an expression will use.
     pub files: Vec<(String, String)>,
+    /// Print scalar results bare, without quotes, styles or comments (yq's
+    /// `-r`). `None` follows yq's default: on for YAML output, off for JSON.
+    pub unwrap_scalar: Option<bool>,
 }
 
 impl Default for EvalOptions {
@@ -56,6 +59,7 @@ impl Default for EvalOptions {
             env: Vec::new(),
             now: None,
             files: Vec::new(),
+            unwrap_scalar: None,
         }
     }
 }
@@ -93,7 +97,9 @@ pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<
     let mut printer = printer::Printer::new(printer::PrinterPrefs {
         format: options.output_format,
         indent: options.indent,
-        unwrap_scalar: true,
+        unwrap_scalar: options
+            .unwrap_scalar
+            .unwrap_or(options.output_format == Format::Yaml),
         print_doc_separators: true,
     });
     let nodes = results.nodes().to_vec();
