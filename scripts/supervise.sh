@@ -115,10 +115,10 @@ while :; do
   log "run $run starting (${remaining}s to deadline)"
   if command -v timeout >/dev/null 2>&1; then
     CLAUDE_CODE_RETRY_WATCHDOG=1 timeout -s TERM "$remaining" \
-      claude -p "$prompt" --output-format json "${perms[@]}" "${resume[@]}" >"$out" 2>"$err"
+      claude -p "$prompt" --output-format json ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err"
   else
     CLAUDE_CODE_RETRY_WATCHDOG=1 \
-      claude -p "$prompt" --output-format json "${perms[@]}" "${resume[@]}" >"$out" 2>"$err"
+      claude -p "$prompt" --output-format json ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err"
   fi
   code=$?
 
