@@ -37,10 +37,7 @@ struct RawScenario {
 }
 
 fn load_scenarios() -> Vec<RawScenario> {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/fixtures/scenarios.json"
-    );
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/scenarios.json");
     let data = std::fs::read_to_string(path).expect("read scenarios.json");
     serde_json::from_str(&data).expect("parse scenarios.json")
 }
@@ -48,7 +45,7 @@ fn load_scenarios() -> Vec<RawScenario> {
 /// The example files `load` scenarios read, under the relative path the Go
 /// tests use (`../../examples/<name>` from `pkg/yqlib`).
 fn load_example_files() -> Vec<(String, String)> {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/examples");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/examples");
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {

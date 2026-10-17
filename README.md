@@ -66,7 +66,7 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 | `crates/yq-wasm` | `cdylib` with a hand-written ABI (`yq_alloc`, `yq_eval`, `yq_free`, `yq_result_free`). No wasm-bindgen. |
 | `crates/yq-cli` | `yq-rs`, a thin CLI for diffing against the reference yq locally. |
 | `js/yq.ts` | Reference loader, runtime-neutral. `js/smoke.ts` exercises it. |
-| `tests/fixtures` | The conformance fixture and its format description. |
+| `crates/yq-core/tests/fixtures` | The conformance fixture and its format description, included in the published crate. |
 
 ## Quick start
 
@@ -108,17 +108,32 @@ git clone https://github.com/mikefarah/yq.git ref/yq
 git -C ref/yq checkout a814ff5166040ec745a96bddd79ee31c3a548e83
 ```
 
-See [the fixture README](tests/fixtures/README.md) for the conformance
+See [the fixture README](crates/yq-core/tests/fixtures/README.md) for the conformance
 result format.
 
 ## Using yq-core from Rust
 
-```rust
-use yq_core::{evaluate, EvalOptions};
-
-let output = evaluate(".a.b[0]", "a:\n  b: [1, 2]\n", &EvalOptions::default())?;
-assert_eq!(output, "1\n");
+```bash
+cargo add yq-core
 ```
+
+```rust
+use yq_core::{evaluate, EvalOptions, Format};
+
+fn main() -> Result<(), yq_core::Error> {
+    let mut options = EvalOptions::default();
+    options.output_format = Format::Json;
+    let output = evaluate(".a.b[0]", "a:\n  b: [1, 2]\n", &options)?;
+    assert_eq!(output, "1\n");
+    Ok(())
+}
+```
+
+`EvalOptions` is non-exhaustive: start with `Default` and set the fields you
+need. The supported public API is `evaluate`, `EvalOptions`, `Format` and
+`Error`. Engine modules are private; the doc-hidden conformance harness
+exists for the upstream tests and is outside that API. Rust 1.87 or newer
+is required.
 
 ## Using the module
 
@@ -353,8 +368,8 @@ implements this protocol; the JSON option keys are listed above.
 ## Development
 
 [AGENTS.md](AGENTS.md) contains the working rules and required checks.
-`tests/fixtures/scenarios.json` is the behavior contract; its
-[README](tests/fixtures/README.md) describes the result format.
+`crates/yq-core/tests/fixtures/scenarios.json` is the behavior contract; its
+[README](crates/yq-core/tests/fixtures/README.md) describes the result format.
 
 ```bash
 cargo test --test conformance
@@ -371,7 +386,7 @@ each failure; the verbose flag only changes stdout.
 The harness enables `fix_merge_anchor_to_spec` for `fixed*` groups and
 `disable_env_ops`/`disable_file_ops` for the corresponding security-disabled
 groups, matching Go's test setup. It fills the host file table for `load`
-from `tests/fixtures/examples/`.
+from `crates/yq-core/tests/fixtures/examples/`.
 
 `crates/yq-core/tests/regressions.rs` covers additional differences found by
 comparison with the pinned Go binary: comments after quoted scalars, flow

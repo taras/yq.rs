@@ -36,10 +36,6 @@ impl Printer {
         }
     }
 
-    pub fn printed_anything(&self) -> bool {
-        self.printed_matches
-    }
-
     pub fn into_output(self) -> String {
         self.out
     }

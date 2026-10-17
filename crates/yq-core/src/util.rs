@@ -201,10 +201,6 @@ pub fn line_comment(node: &Node) -> String {
     node.line_comment.replacen('#', "", 1)
 }
 
-pub fn foot_comment(node: &Node) -> String {
-    node.foot_comment.replacen('#', "", 1)
-}
-
 pub fn head_and_line_comment(node: &Node) -> String {
     head_comment(node) + &line_comment(node)
 }

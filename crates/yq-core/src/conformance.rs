@@ -27,7 +27,7 @@ pub struct Scenario {
 }
 
 /// The fixed clock yq's test suite runs under (`operators_test.go`, `TestMain`).
-pub const TEST_NOW: &str = "2021-05-19T01:02:03.000000004Z";
+const TEST_NOW: &str = "2021-05-19T01:02:03.000000004Z";
 
 /// Runs one scenario and returns the result strings in yq's test format
 /// (`D<doc>, P<path>, (<tag>)::<yaml>`), or the error message.
@@ -66,7 +66,7 @@ fn read_inputs(arena: &mut Arena, scenario: &Scenario) -> Result<Vec<NodeId>, Er
 }
 
 /// `resultToString`.
-pub fn result_to_string(arena: &mut Arena, id: NodeId) -> Result<String, Error> {
+fn result_to_string(arena: &mut Arena, id: NodeId) -> Result<String, Error> {
     let mut printer = Printer::new(PrinterPrefs {
         format: Format::Yaml,
         indent: 4,

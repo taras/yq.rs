@@ -144,21 +144,6 @@ impl Arena {
         &mut self.nodes[id]
     }
 
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
-    pub fn create_child(&mut self, parent: NodeId) -> NodeId {
-        self.push(Node {
-            parent: Some(parent),
-            ..Node::default()
-        })
-    }
-
     pub fn get_document(&self, id: NodeId) -> usize {
         let mut current = id;
         while let Some(parent) = self.nodes[current].parent {
@@ -462,15 +447,6 @@ impl Arena {
             "!!bool" => Ok(ValueRep::Bool(crate::util::is_truthy_node(node))),
             "!!null" => Ok(ValueRep::Null),
             _ => Ok(ValueRep::Str(node.value.clone())),
-        }
-    }
-
-    pub fn kind_string(kind: Kind) -> &'static str {
-        match kind {
-            Kind::Scalar => "ScalarNode",
-            Kind::Sequence => "SequenceNode",
-            Kind::Mapping => "MappingNode",
-            Kind::Alias => "AliasNode",
         }
     }
 }
