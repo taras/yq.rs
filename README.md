@@ -11,7 +11,7 @@ query and transform objects with yq syntax without shipping the Go yq's
 need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
 with 10 skipped for XML/JSON-only decoders. The optimized release module is
-466,854 bytes (203,682 bytes gzipped), within the 2 MB / 700 KB budget.
+466,607 bytes (203,548 bytes gzipped), within the 2 MB / 700 KB budget.
 The package's smoke tests run under Node and Bun.
 
 ## Scope
@@ -451,7 +451,7 @@ uses compression level 9 and a zero timestamp for reproducibility.
 
 Workspace Cargo, npm and lockfile versions must agree. A pushed `vX.Y.Z`
 tag must match that version and runs verification before publishing
-`yq-core` to crates.io and `@executablemd/yq` to npm. The publish job compares
+`yq-core` to crates.io and `yq.rs` to npm. The publish job compares
 the Cargo archive with the verified artifact, publishes the verified npm
 tarball with provenance, attests the release artifacts, and attaches wasm
 to the GitHub release. Release notes include the fixture's pinned yq commit,

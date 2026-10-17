@@ -73,7 +73,8 @@ def bundle():
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     manifest = {"version": version, "commit": commit, "npm": packed["filename"], "crate": crate, "yq_reference": reference, "conformance": report, **sizes()}
     (ARTIFACTS / "release.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (ARTIFACTS / "release-notes.md").write_text(f"Release v{version}\n\nGo yq fixture reference: `{reference}`.\n\n{report}.\n\nWasm: {manifest['wasm_bytes']:,} bytes; {manifest['gzip_bytes']:,} bytes gzipped.\n\nPackages: `yq-core` and `@executablemd/yq`, version {version}.\n")
+    npm_name = json.loads((ROOT / "package.json").read_text())["name"]
+    (ARTIFACTS / "release-notes.md").write_text(f"Release v{version}\n\nGo yq fixture reference: `{reference}`.\n\n{report}.\n\nWasm: {manifest['wasm_bytes']:,} bytes; {manifest['gzip_bytes']:,} bytes gzipped.\n\nPackages: `yq-core` and `{npm_name}`, version {version}.\n")
     names = ["yq.wasm", packed["filename"], crate, "release.json", "release-notes.md"]
     (ARTIFACTS / "SHA256SUMS").write_text("".join(f"{hashlib.sha256((ARTIFACTS / name).read_bytes()).hexdigest()}  {name}\n" for name in names))
 
@@ -111,7 +112,7 @@ def registries():
     if manifest["version"] != version or manifest["commit"] != commit:
         raise SystemExit("Release artifact version/commit does not match checkout")
     crate = registry_json(f"https://crates.io/api/v1/crates/yq-core/{version}")
-    npm = registry_json(f"https://registry.npmjs.org/{urllib.parse.quote('@executablemd/yq', safe='')}/{version}")
+    npm = registry_json(f"https://registry.npmjs.org/{urllib.parse.quote(npm_name, safe='')}/{version}")
     if crate and crate["version"]["checksum"] != hashlib.sha256((ARTIFACTS / manifest["crate"]).read_bytes()).hexdigest():
         raise SystemExit("crates.io already has different bytes for this version")
     expected = "sha512-" + base64.b64encode(hashlib.sha512((ARTIFACTS / manifest["npm"]).read_bytes()).digest()).decode()
