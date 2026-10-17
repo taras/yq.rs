@@ -1,0 +1,6 @@
+# rustup installs the listed targets on first cargo invocation, so a fresh
+# machine (or cloud session) needs no separate setup step.
+[toolchain]
+channel = "stable"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,14 @@
+[package]
+name = "yq-wasm"
+description = "WebAssembly entry points for yq-core, loadable with the plain WebAssembly API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+yq-core = { path = "../yq-core" }

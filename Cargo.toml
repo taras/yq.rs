@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/yq-core", "crates/yq-wasm", "crates/yq-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/taras/yq.rs"
+
+# The wasm module is the product. Size matters more than speed.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
