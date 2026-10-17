@@ -7,19 +7,21 @@
 
 extern crate alloc;
 
+/// Internal support for the upstream conformance fixture, outside the stable API.
+#[doc(hidden)]
 pub mod conformance;
-pub mod context;
-pub mod eval;
-pub mod json;
-pub mod lexer;
-pub mod node;
-pub mod operation;
-pub mod ops;
-pub mod parser;
-pub mod postfix;
-pub mod printer;
-pub mod util;
-pub mod yaml;
+mod context;
+mod eval;
+mod json;
+mod lexer;
+mod node;
+mod operation;
+mod ops;
+mod parser;
+mod postfix;
+mod printer;
+mod util;
+mod yaml;
 
 /// Input and output serialisation formats the engine understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,7 @@ pub enum Format {
 /// Everything the host must supply, since the engine itself has no access to
 /// the environment, the clock, or the filesystem (it runs inside wasm).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EvalOptions {
     pub input_format: Format,
     pub output_format: Format,
@@ -77,6 +80,18 @@ impl std::error::Error for Error {}
 
 /// Evaluates `expression` against `input` and returns the printed results, the
 /// way `yq eval` prints them to stdout.
+///
+/// Host capabilities are supplied explicitly through [`EvalOptions`]. No
+/// environment, clock, filesystem or process access is performed by the engine.
+///
+/// ```
+/// use yq_core::{evaluate, EvalOptions, Format};
+///
+/// let mut options = EvalOptions::default();
+/// options.output_format = Format::Json;
+/// assert_eq!(evaluate(".name", "name: yq\n", &options)?, "\"yq\"\n");
+/// # Ok::<(), yq_core::Error>(())
+/// ```
 pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<String, Error> {
     let mut arena = node::Arena::new();
     let inputs = if options.null_input {

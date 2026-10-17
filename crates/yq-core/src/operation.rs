@@ -391,7 +391,6 @@ impl Prefs {
 /// from `GetPath` are ints, everything else is text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OpValue {
-    None,
     Str(String),
     Int(i64),
     Float(f64),
@@ -402,7 +401,6 @@ pub enum OpValue {
 impl std::fmt::Display for OpValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OpValue::None => Ok(()),
             OpValue::Str(s) => f.write_str(s),
             OpValue::Int(i) => write!(f, "{i}"),
             OpValue::Float(v) => f.write_str(&crate::util::format_float(*v)),
@@ -460,7 +458,6 @@ impl Operation {
             OpValue::Bool(_) => "!!bool",
             OpValue::Str(_) => "!!str",
             OpValue::Null => "!!null",
-            OpValue::None => "",
         };
         Operation {
             op_type: OpType::Value,

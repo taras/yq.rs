@@ -20,7 +20,7 @@
   Each operator lives in `operator_<name>.go`
   with its tests in `operator_<name>_test.go`. The module map in
   `README.md` maps the Go files to the Rust modules.
-- `tests/fixtures/scenarios.json` is the behaviour to match, down to the
+- `crates/yq-core/tests/fixtures/scenarios.json` is the behaviour to match, down to the
   byte. Its README explains the result string format. When the Go code and
   the fixture seem to disagree, the fixture wins; it was dumped from the
   same commit.

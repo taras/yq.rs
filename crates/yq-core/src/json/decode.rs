@@ -25,21 +25,6 @@ pub fn decode_documents(arena: &mut Arena, input: &str) -> Result<Vec<NodeId>, E
     Ok(roots)
 }
 
-/// Parses a single JSON value.
-pub fn parse_value(arena: &mut Arena, input: &str) -> Result<NodeId, Error> {
-    let mut parser = JsonParser {
-        bytes: input.as_bytes(),
-        pos: 0,
-    };
-    parser.skip_whitespace();
-    let id = parser.value(arena, None)?;
-    parser.skip_whitespace();
-    if parser.pos < parser.bytes.len() {
-        return Err(parser.error("invalid character after top-level value"));
-    }
-    Ok(id)
-}
-
 struct JsonParser<'a> {
     bytes: &'a [u8],
     pos: usize,

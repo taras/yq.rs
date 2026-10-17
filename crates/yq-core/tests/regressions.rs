@@ -27,38 +27,19 @@ fn line_comment_after_quoted_scalar_is_kept() {
 
 #[test]
 fn json_output_keeps_string_quotes_by_default() {
-    let json = EvalOptions {
-        output_format: Format::Json,
-        ..EvalOptions::default()
-    };
+    let mut json = EvalOptions::default();
+    json.output_format = Format::Json;
     assert_eq!(eval(".a", "a: x\n", json.clone()), "\"x\"\n");
-    assert_eq!(
-        eval(
-            ".a",
-            "a: x\n",
-            EvalOptions {
-                unwrap_scalar: Some(true),
-                ..json
-            }
-        ),
-        "x\n"
-    );
+    json.unwrap_scalar = Some(true);
+    assert_eq!(eval(".a", "a: x\n", json), "x\n");
 }
 
 #[test]
 fn yaml_output_unwraps_scalars_by_default() {
     assert_eq!(eval(".a", "a: \"x\" # c\n", EvalOptions::default()), "x\n");
-    assert_eq!(
-        eval(
-            ".a",
-            "a: \"x\" # c\n",
-            EvalOptions {
-                unwrap_scalar: Some(false),
-                ..EvalOptions::default()
-            }
-        ),
-        "\"x\" # c\n"
-    );
+    let mut options = EvalOptions::default();
+    options.unwrap_scalar = Some(false);
+    assert_eq!(eval(".a", "a: \"x\" # c\n", options), "\"x\" # c\n");
 }
 
 #[test]

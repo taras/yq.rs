@@ -5,6 +5,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
+keywords = ["yaml", "json", "yq", "query", "wasm"]
+categories = ["parser-implementations", "text-processing", "wasm"]
+documentation = "https://docs.rs/yq-core"
+rust-version = "1.87"
+include = ["/src/**", "/tests/**", "/licenses/**", "/LICENSE", "/THIRD_PARTY_NOTICES.md", "/Cargo.toml"]
 
 [dependencies]
 regex-lite = "0.1"

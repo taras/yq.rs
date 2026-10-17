@@ -16,11 +16,8 @@ fn parse_format(value: &str) -> Format {
 }
 
 fn main() {
-    let mut options = EvalOptions {
-        env: std::env::vars().collect(),
-        now: None,
-        ..EvalOptions::default()
-    };
+    let mut options = EvalOptions::default();
+    options.env = std::env::vars().collect();
     let mut positional = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
