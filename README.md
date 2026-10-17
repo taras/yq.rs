@@ -10,8 +10,8 @@ query and transform objects with yq syntax without shipping the Go yq's
 **Status: 1,107 of 1,111 conformance scenarios pass** (the remaining four
 need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
-with 10 skipped for XML/JSON-only decoders. The measured release module is
-528,353 bytes (210,129 bytes gzipped), within the 2 MB / 700 KB budget.
+with 10 skipped for XML/JSON-only decoders. The optimized release module is
+466,607 bytes (203,548 bytes gzipped), within the 2 MB / 700 KB budget.
 The package's smoke tests run under Node and Bun.
 
 ## Scope
@@ -421,6 +421,51 @@ Build that binary from the fetched checkout with:
 ```bash
 (cd ref/yq && go build -o ../yq-ref .)
 ```
+
+## Releases
+
+[The release workflow](.github/workflows/release.yml) runs on pushes and PRs.
+It checks formatting, Clippy, docs, conformance, the Rust 1.87 minimum,
+standalone packaged-crate tests, and installed npm-package tests in Node
+and Bun. `rust-toolchain.toml` pins the release compiler; runtime versions
+and checksum-verified Binaryen 133 assets are pinned in
+[versions.json](.github/release/versions.json).
+
+To reproduce the optimized package build locally, use Python 3.12 or newer:
+
+```bash
+cargo build --locked --release --target wasm32-unknown-unknown -p yq-wasm
+binaryen_bin="$(python3 .github/release/install_binaryen.py)"
+"$binaryen_bin/wasm-opt" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+  target/wasm32-unknown-unknown/release/yq_wasm.wasm -o js/yq.wasm
+python3 .github/release/verify.py size
+npm ci
+npm run build
+npm test
+```
+
+The explicit wasm feature flags preserve the bulk-memory and saturating
+float-conversion instructions emitted by the pinned Rust compiler. CI
+fails above 2,000,000 raw bytes or 700,000 gzip bytes. The gzip measurement
+uses compression level 9 and a zero timestamp for reproducibility.
+
+Workspace Cargo, npm and lockfile versions must agree. A pushed `vX.Y.Z`
+tag must match that version and runs verification before publishing
+`yq-core` to crates.io and `@executablemd/yq` to npm. The publish job compares
+the Cargo archive with the verified artifact, publishes the verified npm
+tarball with provenance, attests the release artifacts, and attaches wasm
+to the GitHub release. Release notes include the fixture's pinned yq commit,
+the conformance count and module size. A retried release skips a registry
+only when its already-published bytes match the verified artifact.
+
+First publication requires repository secrets `CARGO_REGISTRY_TOKEN` and
+`NPM_TOKEN` with permission to create their respective packages. After the
+packages exist, configure each registry's trusted publisher for owner
+`taras`, repository `yq.rs`, workflow `release.yml` and environment `release`;
+npm must allow direct publishing. Subsequent releases can use OIDC without
+long-lived registry tokens. See the official
+[crates.io setup](https://crates.io/docs/trusted-publishing) and
+[npm setup](https://docs.npmjs.com/trusted-publishers/).
 
 ## License
 
