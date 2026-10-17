@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drives headless Claude Code through PLAN.md until the plan is complete or a
+# Drives headless Claude Code through in-scope conformance work until complete or a
 # deadline arrives, sleeping through usage-limit resets along the way.
 #
 #   caffeinate -i scripts/supervise.sh                 # hard stop: next Saturday 17:00 local
@@ -25,7 +25,7 @@ BRANCH="${BRANCH:-yq-core/milestone-1}"
 MARGIN_MIN="${MARGIN_MIN:-45}"   # no new run starts closer to the deadline than this
 MODEL="${MODEL:-}"               # early phase; empty uses the CLI default
 LATE_MODEL="${LATE_MODEL:-opus}" # mechanical long-tail phase
-SWITCH_AT="${SWITCH_AT:-500}"    # baseline count that marks the end of PLAN.md milestone 2
+SWITCH_AT="${SWITCH_AT:-500}"    # conformance baseline threshold for switching models
 BASELINE_FILE=crates/yq-core/tests/conformance_baseline.txt
 DEADLINE_EPOCH=$(python3 scripts/supervise-time.py deadline "${DEADLINE:-}") || exit 1
 DEADLINE_HUMAN=$(date -r "$DEADLINE_EPOCH" '+%a %Y-%m-%d %H:%M %Z')
@@ -101,14 +101,14 @@ DISALLOWED=(
 
 brief() {
   cat <<'PROMPT'
-Read AGENTS.md, PLAN.md, docs/design.md and tests/fixtures/README.md first. This repo is a Rust port of mikefarah/yq (pkg/yqlib) targeting a small wasm module. Execute PLAN.md milestone by milestone, starting with milestone 1 (node model, YAML and JSON codecs, printer, and the conformance runner in crates/yq-core/src/conformance.rs so scenarios can actually be evaluated), then milestone 2 (lexer, postfix, parser, core operators) and onward. Run scripts/fetch-reference.sh to get the Go source into ref/yq and port from it; the fixture is the spec.
+Read AGENTS.md, README.md and tests/fixtures/README.md first. This repo is a Rust port of mikefarah/yq (pkg/yqlib) targeting a small wasm module. README.md records the implemented architecture, design rationale, supported scope and compatibility gaps. Improve byte-for-byte conformance within that scope, starting with target/conformance-report.txt; run the conformance suite if the report is absent or stale. If every remaining failure requires an explicitly unsupported feature, stop and report it rather than expanding scope. Run scripts/fetch-reference.sh to get the Go source into ref/yq and port from it; the fixture is the spec.
 
 Rules that matter most:
 - Measure with `cargo test --test conformance` and read target/conformance-report.txt. Raise crates/yq-core/tests/conformance_baseline.txt in the same commit that makes more scenarios pass. Never lower it.
 - Commit after every operator group that goes green, naming the group and the new count. Push the branch after every few commits so progress is never lost.
 - Keep crates/yq-core free of std::env, std::fs, std::time, std::process. Verify the wasm with scripts/build-wasm.sh and `deno run --allow-read js/smoke.ts`.
 - No braceless if statements. Comments only for surprising behavior. cargo fmt and `cargo clippy --all-targets -- -D warnings` must pass before each commit.
-- Update PLAN.md "Decisions and findings" whenever you learn something that changes the approach, and keep its conformance count current.
+- Update the relevant README.md architecture section whenever you learn something that changes the approach, and keep its conformance count and compatibility gaps current.
 - You are running unattended with a permission allowlist. If a command is denied, find another way rather than retrying it.
 PROMPT
 }
@@ -117,13 +117,13 @@ protocol() {
   local remaining_min=$1
   cat <<PROMPT
 
-Time budget: the hard stop is $DEADLINE_HUMAN, about ${remaining_min} minutes from now (check with \`date\`). When fewer than 20 minutes remain, stop starting new work: commit, update PLAN.md with the current conformance count and the next step, push, and end your turn.
+Time budget: the hard stop is $DEADLINE_HUMAN, about ${remaining_min} minutes from now (check with \`date\`). When fewer than 20 minutes remain, stop starting new work: commit, update README.md with the current conformance count and any changed compatibility gaps, report the next step in your response, push, and end your turn.
 
-End your turn as soon as a PLAN.md milestone is complete and pushed, even if time remains; the supervisor re-plans between turns. Otherwise keep working until the time budget says to stop.
+End your turn as soon as one coherent operator group or fix is complete and pushed, even if time remains; the supervisor resumes between turns. Otherwise keep working until the time budget says to stop.
 
 End every turn with exactly one of these lines so the supervisor knows what to do:
 YQ_RS_STATUS: CONTINUE   (more work remains; you will be resumed)
-YQ_RS_STATUS: DONE       (every milestone in PLAN.md is complete and pushed)
+YQ_RS_STATUS: DONE       (all in-scope conformance work is complete and pushed; remaining unsupported gaps are documented)
 PROMPT
 }
 
@@ -141,7 +141,7 @@ while :; do
   err="$STATE/run-$run.stderr"
 
   if [ -s "$STATE/session_id" ]; then
-    prompt="Continue working through PLAN.md from where you left off. Re-read PLAN.md and target/conformance-report.txt first.$(protocol $((remaining / 60)))"
+    prompt="Continue the in-scope conformance work from where you left off. Re-read AGENTS.md, README.md and target/conformance-report.txt first. Stop if the remaining failures only require features documented as unsupported.$(protocol $((remaining / 60)))"
     resume=(--resume "$(cat "$STATE/session_id")")
   else
     prompt="$(brief)$(protocol $((remaining / 60)))"
@@ -231,7 +231,7 @@ while :; do
   errors=0
   log "run $run finished (exit $code, est. \$$cost): $(printf '%s' "$result" | tail -n 3 | tr '\n' ' ' | head -c 300)"
   if printf '%s' "$result" | grep -q "YQ_RS_STATUS: DONE"; then
-    log "plan complete"
+    log "in-scope conformance work complete"
     break
   fi
   sleep 5

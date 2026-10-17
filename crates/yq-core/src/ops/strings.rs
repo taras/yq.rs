@@ -1,6 +1,5 @@
 //! `operator_strings.go`: string interpolation and the string helpers the
-//! arithmetic operators share. The regex-based operators arrive in
-//! milestone 3.
+//! arithmetic operators share. Regex operators live in `regex_ops.rs`.
 
 use crate::context::Context;
 use crate::eval::Evaluator;

@@ -1,7 +1,7 @@
 //! yq-core: the yq expression language, evaluated over a YAML/JSON node tree.
 //!
 //! The crate is a port of `pkg/yqlib` from <https://github.com/mikefarah/yq>.
-//! `docs/design.md` describes the architecture; `PLAN.md` the build order.
+//! `README.md` describes the architecture and current compatibility gaps.
 //! Conformance is measured by `tests/conformance.rs` against the scenarios
 //! extracted from yq's own test suite in `tests/fixtures/scenarios.json`.
 
