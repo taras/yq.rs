@@ -5,6 +5,9 @@
 #   caffeinate -i scripts/supervise.sh                 # hard stop: next Saturday 17:00 local
 #   DEADLINE="2026-10-17 17:00" scripts/supervise.sh   # explicit hard stop
 #   SKIP_PERMISSIONS=1 scripts/supervise.sh            # --dangerously-skip-permissions instead of the allowlist
+#   MODEL=fable LATE_MODEL=opus SWITCH_AT=500 scripts/supervise.sh
+#       MODEL runs until the conformance baseline reaches SWITCH_AT, then
+#       LATE_MODEL takes over. Empty MODEL means the CLI default.
 #
 # One conversation is resumed across runs; its id is kept in .supervisor/
 # (gitignored) with one JSON result per run and supervise.log. Delete
@@ -18,6 +21,10 @@ mkdir -p "$STATE"
 LOG="$STATE/supervise.log"
 BRANCH="${BRANCH:-yq-core/milestone-1}"
 MARGIN_MIN="${MARGIN_MIN:-45}"   # no new run starts closer to the deadline than this
+MODEL="${MODEL:-}"               # early phase; empty uses the CLI default
+LATE_MODEL="${LATE_MODEL:-opus}" # mechanical long-tail phase
+SWITCH_AT="${SWITCH_AT:-500}"    # baseline count that marks the end of PLAN.md milestone 2
+BASELINE_FILE=crates/yq-core/tests/conformance_baseline.txt
 DEADLINE_EPOCH=$(python3 scripts/supervise-time.py deadline "${DEADLINE:-}") || exit 1
 DEADLINE_HUMAN=$(date -r "$DEADLINE_EPOCH" '+%a %Y-%m-%d %H:%M %Z')
 
@@ -81,6 +88,8 @@ protocol() {
 
 Time budget: the hard stop is $DEADLINE_HUMAN, about ${remaining_min} minutes from now (check with \`date\`). When fewer than 20 minutes remain, stop starting new work: commit, update PLAN.md with the current conformance count and the next step, push, and end your turn.
 
+End your turn as soon as a PLAN.md milestone is complete and pushed, even if time remains; the supervisor re-plans between turns. Otherwise keep working until the time budget says to stop.
+
 End every turn with exactly one of these lines so the supervisor knows what to do:
 YQ_RS_STATUS: CONTINUE   (more work remains; you will be resumed)
 YQ_RS_STATUS: DONE       (every milestone in PLAN.md is complete and pushed)
@@ -108,12 +117,24 @@ while :; do
     resume=()
   fi
 
+  baseline=$(tr -dc '0-9' <"$BASELINE_FILE" 2>/dev/null)
+  model_args=()
+  model_name="default"
+  if [ -n "$MODEL" ]; then
+    model_args=(--model "$MODEL")
+    model_name="$MODEL"
+  fi
+  if [ -n "$LATE_MODEL" ] && [ "${baseline:-0}" -ge "$SWITCH_AT" ]; then
+    model_args=(--model "$LATE_MODEL")
+    model_name="$LATE_MODEL"
+  fi
+
   perms=(--permission-mode dontAsk --allowedTools "${ALLOWED[@]}" --disallowedTools "${DISALLOWED[@]}")
   if [ "${SKIP_PERMISSIONS:-}" = "1" ]; then
     perms=(--dangerously-skip-permissions)
   fi
 
-  log "run $run starting (${remaining}s to deadline)"
+  log "run $run starting (${remaining}s to deadline, model $model_name, baseline ${baseline:-0})"
   if command -v timeout >/dev/null 2>&1; then
     CLAUDE_CODE_RETRY_WATCHDOG=1 timeout -s TERM "$remaining" \
       claude -p "$prompt" --output-format json ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err"
