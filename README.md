@@ -448,6 +448,24 @@ benefit depends on the workload. The 16-record inputs have `id`, `name`,
 `active` and `score` fields; every third record is active and
 `score = (id * 37) % 100`. The benchmark source contains the exact queries.
 
+Library memory was measured separately in fresh processes, using the same
+machine and runtime versions. Values below are whole-process RSS in MiB,
+including the runtime and inputs, and are medians of three runs:
+
+| Library backend | Loaded, idle | Peak: repeated small queries | Peak: 10 MB YAML |
+|---|---:|---:|---:|
+| Native addon, Node 22 | 44.9 | 53.3 | 114.4 |
+| Wasm, Node 22 | 48.5 | 65.2 | 118.5 |
+| Wasm, Bun | 45.9 | 129.8 | 127.4 |
+
+The repeated workload evaluates each of the four library queries above
+10,000 times. The large workload evaluates `.name` once against the 10 MB
+CLI input in a separate process. Idle RSS is sampled after loading and
+explicit garbage collection; workload peaks come from `/usr/bin/time -l`.
+The measurement harness alone uses about 43.7 MiB in Node and 32.0 MiB in
+Bun. The addon reduces peak RSS by about 18% for the repeated workload;
+its large-input peak is close to wasm in Node.
+
 Reproduce from a built checkout with matching native packages installed in
 `target/bench/install` (use the local tarballs from `.github/release/native.py`):
 
@@ -455,12 +473,13 @@ Reproduce from a built checkout with matching native packages installed in
 python3 .github/bench/cli.py --go /path/to/go-yq --node /path/to/node22 \
   --entry target/bench/install/node_modules/yq.rs/dist/cli.mjs
 /path/to/node22 .github/bench/library.mjs
+python3 .github/bench/memory.py --node /path/to/node22
 ```
 
-Sources and raw samples: [CLI benchmark](.github/bench/cli.py),
-[library benchmark](.github/bench/library.mjs),
-[CLI results](.github/bench/results/2026-10-17-cli.json) and
-[library results](.github/bench/results/2026-10-17-library.json).
+Benchmark sources: [CLI](.github/bench/cli.py),
+[library timing](.github/bench/library.mjs) and
+[library memory](.github/bench/memory.py). Raw samples are written to the
+ignored `target/bench` directory and are not checked into the repository.
 
 ## Architecture
 
