@@ -86,11 +86,33 @@ pub fn decode_documents(
     filename: &str,
     file_index: usize,
 ) -> Result<Vec<NodeId>, Error> {
-    let (leading_content, text) = process_read_stream(input);
+    decode_documents_with(arena, input, filename, file_index, true)
+}
+
+/// `decode_documents` with control over yq's leading-content preprocessing.
+/// `load` turns it off: comments then reach the parser, and a file with
+/// nothing but comments becomes a null node carrying the whole text.
+pub fn decode_documents_with(
+    arena: &mut Arena,
+    input: &str,
+    filename: &str,
+    file_index: usize,
+    preprocess_leading_content: bool,
+) -> Result<Vec<NodeId>, Error> {
+    let (leading_content, text) = if preprocess_leading_content {
+        process_read_stream(input)
+    } else {
+        (String::new(), input.to_string())
+    };
     let mut decoder = Decoder::new(arena, &text);
     let mut roots = decoder
         .decode_all()
         .map_err(|e| Error(format!("bad file '{filename}': {e}")))?;
+    let leading_content = if roots.is_empty() && !preprocess_leading_content {
+        input.to_string()
+    } else {
+        leading_content
+    };
     if roots.is_empty() && !leading_content.is_empty() {
         let blank = arena.push(Node {
             kind: Kind::Scalar,

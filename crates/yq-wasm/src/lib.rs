@@ -104,6 +104,7 @@ fn parse_options(json: &str) -> Result<EvalOptions, String> {
             "nullInput" => options.null_input = value == "true",
             "now" => options.now = Some(value),
             "env" => options.env = flat_json_pairs(&value)?,
+            "files" => options.files = flat_json_pairs(&value)?,
             other => return Err(format!("unknown option: {other}")),
         }
     }

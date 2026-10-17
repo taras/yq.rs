@@ -22,6 +22,8 @@ pub struct Scenario {
     pub expected: Vec<String>,
     pub expected_error: String,
     pub environment_variables: Vec<(String, String)>,
+    /// Files the `load` scenarios read, keyed by the path they use.
+    pub files: Vec<(String, String)>,
 }
 
 /// The fixed clock yq's test suite runs under (`operators_test.go`, `TestMain`).
@@ -36,6 +38,7 @@ pub fn run_scenario(scenario: &Scenario) -> Result<Vec<String>, String> {
     let mut evaluator = crate::eval::Evaluator::new(arena);
     evaluator.env = scenario.environment_variables.clone();
     evaluator.now = Some(TEST_NOW.to_string());
+    evaluator.files = scenario.files.clone();
     // The Go suite runs the `fixed*` groups with the merge-anchor fix on.
     evaluator.fix_merge_anchor_to_spec = scenario.group.starts_with("fixed");
     evaluator.disable_env_ops = scenario.group == "envOperatorSecurityDisabledScenarios";

@@ -19,6 +19,7 @@ pub mod equals;
 pub mod eval_op;
 pub mod formats;
 pub mod keys;
+pub mod load;
 pub mod meta;
 pub mod multiply;
 pub mod path;
@@ -39,22 +40,6 @@ fn unsupported(_d: &mut Evaluator, _context: Context, expr: &ExprNode) -> Result
     Err(Error(format!(
         "operator {} is not supported yet",
         expr.op.op_type.name()
-    )))
-}
-
-/// `load`, `load_str`: the engine has no filesystem, so only yq's
-/// security error can be reproduced.
-fn load_unavailable(
-    d: &mut Evaluator,
-    _context: Context,
-    expr: &ExprNode,
-) -> Result<Context, Error> {
-    if d.disable_file_ops {
-        return Err(Error("file operations have been disabled".to_string()));
-    }
-    Err(Error(format!(
-        "{} is not available: this build has no file access",
-        expr.op.string_value
     )))
 }
 
@@ -183,7 +168,8 @@ pub fn handler(op_type: OpType) -> Handler {
         OpType::Match => regex_ops::match_operator,
         OpType::Capture => regex_ops::capture_operator,
         OpType::Test => regex_ops::test_operator,
-        OpType::Load | OpType::LoadString => load_unavailable,
+        OpType::Load => load::load_operator,
+        OpType::LoadString => load::load_string_operator,
         OpType::System => system_unavailable,
         _ => unsupported,
     }

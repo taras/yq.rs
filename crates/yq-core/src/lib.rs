@@ -41,6 +41,9 @@ pub struct EvalOptions {
     pub env: Vec<(String, String)>,
     /// RFC 3339 timestamp returned by `now`. `None` makes `now` an error.
     pub now: Option<String>,
+    /// File contents for `load`, `load_str`, `load_props` and
+    /// `load_base64`, keyed by the exact path an expression will use.
+    pub files: Vec<(String, String)>,
 }
 
 impl Default for EvalOptions {
@@ -52,6 +55,7 @@ impl Default for EvalOptions {
             null_input: false,
             env: Vec::new(),
             now: None,
+            files: Vec::new(),
         }
     }
 }
@@ -83,6 +87,7 @@ pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<
     let mut evaluator = eval::Evaluator::new(arena);
     evaluator.env = options.env.clone();
     evaluator.now = options.now.clone();
+    evaluator.files = options.files.clone();
     let results =
         evaluator.get_matching_nodes_opt(context::Context::new(inputs), parsed.as_ref())?;
     let mut printer = printer::Printer::new(printer::PrinterPrefs {

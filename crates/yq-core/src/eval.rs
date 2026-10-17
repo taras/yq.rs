@@ -20,6 +20,8 @@ pub struct Evaluator {
     /// this engine, but the flags select the error message.
     pub disable_env_ops: bool,
     pub disable_file_ops: bool,
+    /// Host-supplied file contents for `load`, keyed by path.
+    pub files: Vec<(String, String)>,
 }
 
 pub type Handler = fn(&mut Evaluator, Context, &ExprNode) -> Result<Context, Error>;
@@ -34,6 +36,7 @@ impl Evaluator {
             fix_merge_anchor_to_spec: false,
             disable_env_ops: false,
             disable_file_ops: false,
+            files: Vec::new(),
         }
     }
 

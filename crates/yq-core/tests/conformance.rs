@@ -45,6 +45,22 @@ fn load_scenarios() -> Vec<RawScenario> {
     serde_json::from_str(&data).expect("parse scenarios.json")
 }
 
+/// The example files `load` scenarios read, under the relative path the Go
+/// tests use (`../../examples/<name>` from `pkg/yqlib`).
+fn load_example_files() -> Vec<(String, String)> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/examples");
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Ok(contents) = std::fs::read_to_string(entry.path()) {
+                files.push((format!("../../examples/{name}"), contents));
+            }
+        }
+    }
+    files
+}
+
 fn read_baseline() -> usize {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -62,6 +78,7 @@ fn conformance() {
     let group_filter = std::env::var("YQ_CONFORMANCE_GROUP").ok();
     let verbose = std::env::var("YQ_CONFORMANCE_VERBOSE").is_ok();
     let scenarios = load_scenarios();
+    let example_files = load_example_files();
 
     let mut passed = 0usize;
     let mut skipped = 0usize;
@@ -95,6 +112,7 @@ fn conformance() {
                 .unwrap_or_default()
                 .into_iter()
                 .collect(),
+            files: example_files.clone(),
         };
         let entry = per_group.entry(raw.group.clone()).or_insert((0, 0));
         entry.1 += 1;

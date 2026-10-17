@@ -113,9 +113,12 @@ bounded.
 
 ### 5. Fidelity — done except `load`
 
-Landed 2026-10-17: 1,092 of 1,111. Comments, anchors, aliases and styles
-all pass; the 19 remaining scenarios are `load` (13, plus 2 in multiply)
-and `shuffle` (3, plus 1 in delete).
+Landed 2026-10-17: 1,107 of 1,111. Comments, anchors, aliases, styles and
+`load` all pass. `load` reads from `EvalOptions::files`, a path-to-contents
+table the host supplies (the conformance harness fills it from
+`tests/fixtures/examples/`, copied from yq's `examples/`). The 4 remaining
+scenarios need `shuffle`, which would require reproducing Go's `math/rand`
+sequence bit for bit.
 
 - Comment preservation: head, line and foot comments through decode,
   operators and encode. This needs a comment-aware YAML scanner, since no
@@ -124,8 +127,8 @@ and `shuffle` (3, plus 1 in delete).
 - Anchor and alias behaviour under merge (`*`, `explode`), the
   `fixedAnchorOperatorScenarios` group.
 - Style round-tripping (`styleOperatorScenarios`).
-- `load`, `strload`: only if the host wants to supply a file-read callback
-  through the ABI.
+- `load`, `strload`: served from the `files` option rather than a
+  callback, so the module still instantiates with an empty import object.
 
 Target: above 1,050 of 1,111.
 

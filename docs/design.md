@@ -137,6 +137,7 @@ Options are a JSON object:
 | `nullInput` | boolean | false | Evaluate against a single null document. |
 | `env` | object of strings | `{}` | Values for `env`, `strenv`, `envsubst`. |
 | `now` | RFC 3339 string | unset | Value of `now`. Unset makes `now` an error. |
+| `files` | object of strings | `{}` | Contents for `load`, `load_str`, `load_props` and `load_base64`, keyed by the exact path the expression uses. |
 
 The engine never reads the real environment, clock or filesystem. That is
 what makes the module instantiable with an empty import object on every
