@@ -86,6 +86,7 @@ jobs:
           python3 .github/release/install_binaryen.py >> "$GITHUB_PATH"
       - name: Check Rust and conformance
         run: |
+          python3 -m unittest discover -s .github/release -p 'test_*.py'
           cargo fmt --check
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo test --locked --workspace
