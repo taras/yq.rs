@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/yq-core", "crates/yq-wasm", "crates/yq-cli"]
+members = ["crates/yq-core", "crates/yq-wasm", "crates/yq-cli", "crates/yq-node"]
 
 [workspace.package]
 version = "0.1.2"
@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT AND Apache-2.0"
 repository = "https://github.com/taras/yq.rs"
 
-# The wasm module is the product. Size matters more than speed.
+# Keep native and wasm builds small.
 [profile.release]
 opt-level = "z"
 lto = true

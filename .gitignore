@@ -7,3 +7,5 @@
 *.wasm.gz
 /.supervisor
 /.claude/worktrees
+
+__pycache__/

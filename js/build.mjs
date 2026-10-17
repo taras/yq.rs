@@ -17,6 +17,8 @@ execFileSync(process.execPath, ["node_modules/typescript/bin/tsc", "--project", 
 });
 await copyFile(new URL("./yq.wasm", import.meta.url), new URL("../dist/yq.wasm", import.meta.url));
 await copyFile(new URL("../bin/yq.js", import.meta.url), new URL("../dist/cli.mjs", import.meta.url));
+await copyFile(new URL("../bin/yq-wasm.js", import.meta.url), new URL("../dist/cli-wasm.mjs", import.meta.url));
+await copyFile(new URL("./platform.mjs", import.meta.url), new URL("../dist/platform.mjs", import.meta.url));
 await writeFile(new URL("../dist/inline.js", import.meta.url), `import { createYq as instantiate } from "./yq.js";
 export { YqError } from "./yq.js";
 
@@ -40,6 +42,15 @@ export const yq = await createYq();
 await writeFile(new URL("../dist/inline.d.ts", import.meta.url), `import type { Yq } from "./yq.js";
 export { YqError } from "./yq.js";
 export type { EvalOptions, Evaluation, Format, Yq } from "./yq.js";
+export declare function createYq(): Promise<Yq>;
+export declare const yq: Yq;
+`);
+
+await copyFile(new URL("./native.mjs", import.meta.url), new URL("../dist/native.mjs", import.meta.url));
+await writeFile(new URL("../dist/native.d.ts", import.meta.url), `import type { Yq } from "./yq.js";
+export { YqError } from "./yq.js";
+export type { EvalOptions, Evaluation, Format, Yq } from "./yq.js";
+export declare const backend: "native" | "wasm";
 export declare function createYq(): Promise<Yq>;
 export declare const yq: Yq;
 `);

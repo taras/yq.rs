@@ -12,5 +12,7 @@
       "name": "binaryen-version_133-arm64-macos.tar.gz",
       "sha256": "ad66da82ac13f163e424b1643f16c6dfcccc98b5966296b43e52d3cab04f84a8"
     }
-  }
+  },
+  "cargo_zigbuild": "0.23.4",
+  "ziglang": "0.14.1"
 }

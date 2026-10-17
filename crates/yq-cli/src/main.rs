@@ -143,6 +143,13 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
                         let number = value
                             .parse::<i64>()
                             .ok()
+                            .filter(|_| {
+                                value
+                                    .strip_prefix('-')
+                                    .unwrap_or(value)
+                                    .bytes()
+                                    .all(|b| b.is_ascii_digit())
+                            })
                             .filter(|n| n.unsigned_abs() <= 9_007_199_254_740_991);
                         let number = number.ok_or_else(|| format!("invalid argument \"{value}\" for \"{spelling}\" flag: invalid syntax"))?;
                         if number < 0 {

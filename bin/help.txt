@@ -18,7 +18,7 @@ Read stdin when no file is given or a file is '-'. Evaluate files independently.
   -h, --help              Show this help
   -V, --version           Show package and reference yq versions
 
-Environment variables and the clock are supplied by Node/Bun. File loading
+Environment variables and the clock are supplied by the CLI. File loading
 supports literal paths in load, load_str, load_props and load_base64 only.
 
 Unsupported: eval-all/ea, dynamic load paths, split-exp, front-matter,

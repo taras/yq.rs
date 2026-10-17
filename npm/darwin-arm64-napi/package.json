@@ -1,0 +1,31 @@
+{
+  "name": "yq.rs-darwin-arm64-napi",
+  "version": "0.1.2",
+  "description": "Node-API addon for yq.rs on darwin-arm64",
+  "license": "MIT AND Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taras/yq.rs.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "yq.node",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "crates/yq-core/licenses/",
+    "licenses/"
+  ],
+  "exports": {
+    ".": "./yq.node",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "yq.node"
+}

@@ -19,7 +19,17 @@ const loader = await import("yq.rs/loader");
 assert.deepEqual(WebAssembly.Module.imports(await WebAssembly.compile(bytes)), []);
 assert.equal(inline.YqError, loader.YqError);
 
+const native = await import("yq.rs/native");
+assert.equal(native.YqError, inline.YqError);
+if (process.env.YQ_TEST_NATIVE_ADDON_PACKAGE && !process.versions.bun && process.env.YQ_FORCE_WASM !== "1") {
+  assert.equal(native.backend, "native", "Addon test must exercise the native backend");
+} else {
+  assert.equal(native.backend, "wasm");
+  assert.equal(native.yq, inline.yq);
+}
 const engines = [
+  ["native entry ready instance", native.yq],
+  ["native entry factory", await native.createYq()],
   ["inline ready instance", inline.yq],
   ["inline factory", await inline.createYq()],
   ["raw bytes loader", await loader.createYq(bytes)],
