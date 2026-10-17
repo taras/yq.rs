@@ -5,7 +5,14 @@
 //! Conformance is measured by `tests/conformance.rs` against the scenarios
 //! extracted from yq's own test suite in `tests/fixtures/scenarios.json`.
 
+extern crate alloc;
+
 pub mod conformance;
+pub mod json;
+pub mod node;
+pub mod printer;
+pub mod util;
+pub mod yaml;
 
 /// Input and output serialisation formats the engine understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,8 +63,24 @@ impl std::error::Error for Error {}
 /// Evaluates `expression` against `input` and returns the printed results, the
 /// way `yq eval` prints them to stdout.
 pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<String, Error> {
-    let _ = (expression, input, options);
-    Err(Error(
-        "yq-core: evaluate is not implemented yet (see PLAN.md milestone 1)".to_string(),
-    ))
+    let mut arena = node::Arena::new();
+    let inputs = if options.null_input {
+        vec![arena.push(node::Node::scalar("!!null", ""))]
+    } else {
+        match options.input_format {
+            Format::Yaml => yaml::decode::decode_documents(&mut arena, input, "", 0)?,
+            Format::Json => json::decode::decode_documents(&mut arena, input)?,
+        }
+    };
+    let _ = expression;
+    let mut printer = printer::Printer::new(printer::PrinterPrefs {
+        format: options.output_format,
+        indent: options.indent,
+        unwrap_scalar: true,
+        print_doc_separators: true,
+    });
+    for id in inputs {
+        printer.print_node(&mut arena, id)?;
+    }
+    Ok(printer.into_output())
 }
