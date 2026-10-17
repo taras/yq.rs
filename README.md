@@ -11,7 +11,7 @@ query and transform objects with yq syntax without shipping the Go yq's
 need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
 with 10 skipped for XML/JSON-only decoders. The optimized release module is
-468,429 bytes (204,498 bytes gzipped), within the 2 MB / 700 KB budget.
+468,437 bytes (204,497 bytes gzipped), within the 2 MB / 700 KB budget.
 The package's smoke tests run under Node and Bun.
 
 ## Scope

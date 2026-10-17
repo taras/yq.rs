@@ -1,6 +1,6 @@
 {
   "name": "yq.rs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "YAML and JSON queries with yq-compatible semantics, powered by Rust and WebAssembly",
   "type": "module",
   "main": "./dist/inline.js",
