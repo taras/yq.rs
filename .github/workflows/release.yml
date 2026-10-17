@@ -1,0 +1,144 @@
+name: Verify and release
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*.*.*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      node: ${{ steps.metadata.outputs.node }}
+      npm: ${{ steps.metadata.outputs.npm }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: metadata
+        name: Check versions and tag
+        run: python3 .github/release/verify.py metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.metadata.outputs.node }}
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ steps.metadata.outputs.bun }}
+      - name: Install pinned toolchains
+        run: |
+          rustup show active-toolchain
+          npm install --global npm@${{ steps.metadata.outputs.npm }} --ignore-scripts
+          python3 .github/release/install_binaryen.py >> "$GITHUB_PATH"
+      - name: Check Rust and conformance
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace
+          RUSTDOCFLAGS='-D warnings' cargo doc --locked -p yq-core --no-deps
+      - name: Check minimum supported Rust
+        run: |
+          rustup toolchain install '${{ steps.metadata.outputs.msrv }}' --profile minimal
+          cargo +${{ steps.metadata.outputs.msrv }} test --locked -p yq-core
+      - name: Build and optimize wasm
+        run: |
+          cargo build --locked --release --target wasm32-unknown-unknown -p yq-wasm
+          wasm-opt --version
+          wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int target/wasm32-unknown-unknown/release/yq_wasm.wasm -o js/yq.wasm
+          python3 .github/release/verify.py size
+      - name: Build and test installed npm package on Node and Bun
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+          npm test
+      - name: Verify published Rust package and tests
+        run: |
+          cargo publish --locked --dry-run -p yq-core
+          # The publish dry run does not retain an archive on a clean runner.
+          cargo package --locked -p yq-core
+          version='${{ steps.metadata.outputs.version }}'
+          package_dir=$(mktemp -d)
+          tar -xzf "target/package/yq-core-$version.crate" -C "$package_dir"
+          cargo test --locked --manifest-path "$package_dir/yq-core-$version/Cargo.toml"
+      - name: Assemble verified release artifacts
+        run: python3 .github/release/verify.py bundle
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-inputs-${{ github.sha }}
+          path: target/release-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      CARGO_TOKEN_AVAILABLE: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ needs.verify.outputs.node }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install pinned toolchains
+        run: |
+          rustup show active-toolchain
+          npm install --global npm@${{ needs.verify.outputs.npm }} --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-inputs-${{ github.sha }}
+          path: target/release-artifacts/
+      - id: registry
+        name: Verify artifacts and check existing publications
+        run: python3 .github/release/verify.py registries
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Attest verified release artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: target/release-artifacts/*
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: cargo-auth
+        if: steps.registry.outputs.cargo_exists != 'true' && env.CARGO_TOKEN_AVAILABLE != 'true'
+      - name: Publish yq-core
+        if: steps.registry.outputs.cargo_exists != 'true'
+        run: |
+          cargo package --locked -p yq-core
+          cmp "target/package/yq-core-${{ needs.verify.outputs.version }}.crate" "target/release-artifacts/yq-core-${{ needs.verify.outputs.version }}.crate"
+          cargo publish --locked -p yq-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.cargo-auth.outputs.token }}
+      - name: Publish npm with provenance
+        if: steps.registry.outputs.npm_exists != 'true'
+        run: npm publish "target/release-artifacts/${{ steps.registry.outputs.npm_file }}" --access public --provenance --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create GitHub release and attach wasm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes-file target/release-artifacts/release-notes.md
+            gh release upload "$RELEASE_TAG" target/release-artifacts/yq.wasm target/release-artifacts/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" target/release-artifacts/yq.wasm target/release-artifacts/SHA256SUMS --verify-tag --title "$RELEASE_TAG" --notes-file target/release-artifacts/release-notes.md
+          fi

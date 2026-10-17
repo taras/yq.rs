@@ -37,8 +37,10 @@ const cases = [
   [".", "a:\n  b: 1\n", "a:\n    b: 1\n", { indent: 4 }],
   ['"new"', "ignored: [invalid", "new\n", { nullInput: true }],
   ['strenv(NAME)', "", "München 😀\n", { nullInput: true, env: { NAME: "München 😀" } }],
+  ['strenv(NAME)', "", 'left } right { "quoted" \\ \b\f\n', { nullInput: true, env: { NAME: 'left } right { "quoted" \\ \b\f' } }],
   ["now", "", "2026-10-17T12:34:56Z\n", { nullInput: true, now: "2026-10-17T12:34:56Z" }],
   ['load("settings.yml").enabled', "", "true\n", { nullInput: true, files: { "settings.yml": "enabled: true\n" } }],
+  ['load("settings.yml").name', "", "{text}\n", { nullInput: true, files: { "settings.yml": 'name: "{text}"\n' } }],
 ];
 
 for (const [name, engine] of engines) {

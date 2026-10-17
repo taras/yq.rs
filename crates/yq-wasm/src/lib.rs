@@ -149,13 +149,22 @@ fn flat_json_pairs(json: &str) -> Result<Vec<(String, String)>, String> {
         while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
+        if i == chars.len() {
+            return Err(format!("missing value for key {key}"));
+        }
         let value = if chars[i] == '"' {
             read_json_string(&chars, &mut i)?
         } else if chars[i] == '{' {
             let start = i;
             let mut depth = 0;
             loop {
-                if chars[i] == '{' {
+                if i >= chars.len() {
+                    return Err("unterminated object in options".to_string());
+                }
+                if chars[i] == '"' {
+                    read_json_string(&chars, &mut i)?;
+                    continue;
+                } else if chars[i] == '{' {
                     depth += 1;
                 } else if chars[i] == '}' {
                     depth -= 1;
@@ -165,9 +174,6 @@ fn flat_json_pairs(json: &str) -> Result<Vec<(String, String)>, String> {
                     }
                 }
                 i += 1;
-                if i >= chars.len() {
-                    return Err("unterminated object in options".to_string());
-                }
             }
             chars[start..i].iter().collect()
         } else {
@@ -183,7 +189,7 @@ fn flat_json_pairs(json: &str) -> Result<Vec<(String, String)>, String> {
 }
 
 fn read_json_string(chars: &[char], i: &mut usize) -> Result<String, String> {
-    if chars[*i] != '"' {
+    if chars.get(*i) != Some(&'"') {
         return Err("expected string".to_string());
     }
     *i += 1;
@@ -201,6 +207,8 @@ fn read_json_string(chars: &[char], i: &mut usize) -> Result<String, String> {
                     'n' => out.push('\n'),
                     't' => out.push('\t'),
                     'r' => out.push('\r'),
+                    'b' => out.push('\u{0008}'),
+                    'f' => out.push('\u{000C}'),
                     'u' => {
                         let hex: String = chars
                             .get(*i + 1..*i + 5)
@@ -219,4 +227,36 @@ fn read_json_string(chars: &[char], i: &mut usize) -> Result<String, String> {
         *i += 1;
     }
     Err("unterminated string".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_options;
+
+    #[test]
+    fn nested_host_values_preserve_json_punctuation_and_escapes() {
+        let options = parse_options(
+            r#"{"nullInput":true,"env":{"NAME":"left } right { \"quoted\" \\ \b\f"},"files":{"data.yml":"name: \"{text}\"\n"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            yq_core::evaluate("strenv(NAME)", "", &options).unwrap(),
+            "left } right { \"quoted\" \\ \u{0008}\u{000C}\n"
+        );
+        assert_eq!(
+            yq_core::evaluate(r#"load("data.yml").name"#, "", &options).unwrap(),
+            "{text}\n"
+        );
+    }
+
+    #[test]
+    fn truncated_options_return_errors() {
+        for json in [
+            r#"{"indent":}"#,
+            r#"{"env":{"#,
+            r#"{"env":{"NAME":"unterminated}}"#,
+        ] {
+            assert!(parse_options(json).is_err(), "accepted {json}");
+        }
+    }
 }
