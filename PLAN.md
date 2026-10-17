@@ -15,7 +15,12 @@ decoders). Record the count at each milestone.
 Workspace, conformance harness with ratchet, wasm ABI and loader, CLI,
 fixture extracted from yq commit `a814ff5` (2026-10-09). Baseline: 0.
 
-### 1. Node model, YAML and JSON codecs, conformance runner
+### 1. Node model, YAML and JSON codecs, conformance runner — done
+
+Landed 2026-10-16. Conformance: 6 of 1,111 (every scenario whose
+expression is `.`, plus one that only needs the error path). The estimate
+of 20 to 40 was wrong: nearly every scenario needs the expression parser.
+Release wasm: 206 KB (88 KB gzipped) before any operator exists.
 
 - `node.rs`: port `CandidateNode` (kind, tag, value, style, anchor, alias,
   content, parent, key, document index, file index, filename, comments,
@@ -121,3 +126,20 @@ Target: above 1,050 of 1,111.
 - 2026-10-16: JSON. Write the parser and emitter by hand; order preservation,
   yq's number formatting and tag assignment are simpler to own than to adapt
   from serde_json, and it keeps serde out of the wasm binary.
+- 2026-10-16: The yq commit the fixture came from uses `go.yaml.in/yaml/v4`
+  with `WithV3Defaults()`, not yaml.v3 itself. v4 adds a "desolver" pass
+  before serialising (drops `!!map`/`!!seq`/inferable scalar tags, and
+  double-quotes a `!!str` whose text would resolve to another type) and the
+  `CompactSeqIndent` emitter option. `yaml/encode.rs` ports the desolver
+  and serializer; `yaml/emitter.rs` is a line-for-line port of
+  `internal/libyaml/emitter.go` so the output matches byte for byte. The
+  reference checkout lives in `ref/go-yaml`.
+- 2026-10-16: `saphyr-parser` is vendored into `yaml/saphyr/` (MIT) rather
+  than depended on, with two local changes: anchor names are exposed on the
+  parser (`anchor_name`), and collection start events report block vs flow
+  style (`last_start_was_flow`). Both are needed by the decoder and neither
+  is in the upstream API.
+- 2026-10-16: `target/conformance-report.txt` always records document,
+  expected and actual for each failure; `YQ_CONFORMANCE_VERBOSE` only
+  affects stdout. The unattended permission allowlist rejects commands with
+  a leading `VAR=value`, so the report file is the way to see failures.

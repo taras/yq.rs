@@ -247,7 +247,7 @@ impl<T: Input + Clone> Clone for Parser<'_, T> {
 /// ```
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// # use saphyr_parser::{Event, EventReceiver, Parser};
 /// #
 /// /// Sink of events. Collects them into an array.

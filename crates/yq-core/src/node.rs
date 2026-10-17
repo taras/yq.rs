@@ -327,10 +327,7 @@ impl Arena {
     }
 
     fn do_copy(&mut self, id: NodeId, clone_content: bool) -> NodeId {
-        let copy_key = match self.nodes[id].key {
-            Some(key) => Some(self.copy(key)),
-            None => None,
-        };
+        let copy_key = self.nodes[id].key.map(|key| self.copy(key));
         let original = self.nodes[id].clone();
         let clone = self.push(Node {
             content: Vec::new(),
@@ -506,7 +503,10 @@ pub fn recursive_node_equal(arena: &mut Arena, lhs: NodeId, rhs: NodeId) -> bool
     match lhs_kind {
         Kind::Scalar => arena.get(lhs).value == arena.get(rhs).value,
         Kind::Sequence => {
-            let (lc, rc) = (arena.get(lhs).content.clone(), arena.get(rhs).content.clone());
+            let (lc, rc) = (
+                arena.get(lhs).content.clone(),
+                arena.get(rhs).content.clone(),
+            );
             if lc.len() != rc.len() {
                 return false;
             }
@@ -515,7 +515,10 @@ pub fn recursive_node_equal(arena: &mut Arena, lhs: NodeId, rhs: NodeId) -> bool
                 .all(|(l, r)| recursive_node_equal(arena, *l, *r))
         }
         Kind::Mapping => {
-            let (lc, rc) = (arena.get(lhs).content.clone(), arena.get(rhs).content.clone());
+            let (lc, rc) = (
+                arena.get(lhs).content.clone(),
+                arena.get(rhs).content.clone(),
+            );
             if lc.len() != rc.len() {
                 return false;
             }

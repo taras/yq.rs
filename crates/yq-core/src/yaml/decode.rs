@@ -209,11 +209,7 @@ impl<'a, 'input> Decoder<'a, 'input> {
                 let name = self.parser.anchor_name(anchor_id).to_string();
                 let target = match self.anchors.get(&name) {
                     Some(target) => *target,
-                    None => {
-                        return Err(Error(format!(
-                            "yaml: unknown anchor '{name}' referenced"
-                        )))
-                    }
+                    None => return Err(Error(format!("yaml: unknown anchor '{name}' referenced"))),
                 };
                 let node = self.arena.get_mut(id);
                 node.kind = Kind::Alias;

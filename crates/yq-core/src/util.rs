@@ -16,8 +16,15 @@ pub fn parse_int64(number_string: &str) -> Result<(&'static str, i64), Error> {
         Some(b'-') => ("-", &cleaned[1..]),
         _ => ("", cleaned.as_str()),
     };
-    let bad = || Error(format!("strconv.ParseInt: parsing \"{number_string}\": invalid syntax"));
-    if let Some(hex) = digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")) {
+    let bad = || {
+        Error(format!(
+            "strconv.ParseInt: parsing \"{number_string}\": invalid syntax"
+        ))
+    };
+    if let Some(hex) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
         let value = i64::from_str_radix(&format!("{sign}{hex}"), 16).map_err(|_| bad())?;
         return Ok(("0x%X", value));
     }
@@ -26,7 +33,11 @@ pub fn parse_int64(number_string: &str) -> Result<(&'static str, i64), Error> {
         return Ok(("0o%o", value));
     }
     let trimmed = cleaned.strip_prefix('+').unwrap_or(&cleaned);
-    if trimmed.is_empty() || !trimmed.trim_start_matches('-').bytes().all(|b| b.is_ascii_digit())
+    if trimmed.is_empty()
+        || !trimmed
+            .trim_start_matches('-')
+            .bytes()
+            .all(|b| b.is_ascii_digit())
     {
         return Err(bad());
     }
@@ -83,7 +94,7 @@ pub fn format_float(value: f64) -> String {
         return if value.is_sign_negative() { "-0" } else { "0" }.to_string();
     }
     let exponent = value.abs().log10().floor() as i32;
-    if exponent < -4 || exponent >= 21 {
+    if !(-4..21).contains(&exponent) {
         // Go prints %e with the shortest mantissa and a two-digit exponent.
         let formatted = format!("{value:e}");
         let (mantissa, exp) = formatted.split_once('e').unwrap_or((&formatted, "0"));
