@@ -346,7 +346,12 @@ fn write_stdout(text: &str) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let mut config = parse_args(&std::env::args().skip(1).collect::<Vec<_>>())?;
+    let mut config = parse_args(
+        &std::env::args_os()
+            .skip(1)
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+    )?;
     if config.help
         || (config.positional.first().is_some_and(|s| s == "help")
             && config.expression.is_none()

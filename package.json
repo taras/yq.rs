@@ -72,7 +72,9 @@
     "yq.rs-linux-x64-gnu-napi": "0.1.2",
     "yq.rs-linux-arm64-gnu-napi": "0.1.2",
     "yq.rs-linux-x64-musl-napi": "0.1.2",
-    "yq.rs-win32-x64-napi": "0.1.2"
+    "yq.rs-win32-x64-napi": "0.1.2",
+    "yq.rs-linux-arm64-musl": "0.1.2",
+    "yq.rs-linux-arm64-musl-napi": "0.1.2"
   },
   "napi": {
     "binaryName": "yq",
@@ -82,6 +84,7 @@
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu",
       "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
       "x86_64-pc-windows-msvc"
     ]
   }

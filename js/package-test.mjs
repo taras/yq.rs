@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmod, copyFile, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
+import { platformTarget } from "./platform.mjs";
 import { fileURLToPath } from "node:url";
 
 function npm(args, options) {
@@ -86,6 +88,32 @@ await createYq(new Uint8Array());
         for (const path of paths) {
           await rename(`${path}.hidden`, path);
         }
+      }
+    }
+    if (process.env.YQ_TEST_NATIVE_PACKAGE && process.platform !== "win32") {
+      const native = createRequire(join(fixture, "package.json")).resolve(`yq.rs-${platformTarget()}/yq`);
+      const bytes = await readFile(native);
+      const mode = (await stat(native)).mode & 0o777;
+      const assertFallback = code => {
+        const result = spawnSync(command, [bin, ".name"], { cwd: fixture, input: "name: Ada\n", encoding: "utf8" });
+        assert.equal(result.status, 0, `${code} must fall back to wasm`);
+        assert.equal(result.stdout, "Ada\n");
+        assert.equal(result.stderr, "");
+      };
+      try {
+        await chmod(native, 0o644);
+        assertFallback("EACCES");
+        await chmod(native, 0o755);
+        await writeFile(native, "#!/yq-test-missing-interpreter\n");
+        assertFallback("ENOENT");
+        await writeFile(native, "#!/bin/sh\nprintf 'native partial\\n'\nexit 42\n");
+        const failure = spawnSync(command, [bin, ".name"], { cwd: fixture, input: "name: Ada\n", encoding: "utf8" });
+        assert.equal(failure.status, 42, "An executed binary's failure must not retry through wasm");
+        assert.equal(failure.stdout, "native partial\n");
+        assert.equal(failure.stderr, "");
+      } finally {
+        await writeFile(native, bytes);
+        await chmod(native, mode);
       }
     }
     execFileSync(command, [join(fixture, "smoke.mjs")], {

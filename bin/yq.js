@@ -27,9 +27,9 @@ if (binary) {
     if (error.signal) {
       process.exit(128 + (constants.signals[error.signal] ?? 1));
     }
-    process.stderr.write(`Error: could not run native yq: ${error.message}\n`);
-    process.exit(1);
+    binary = undefined;
   }
-} else {
+}
+if (!binary) {
   await import("./cli-wasm.mjs");
 }

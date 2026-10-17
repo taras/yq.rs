@@ -168,7 +168,7 @@ jobs:
           name: release-inputs-${{ github.sha }}
           path: target/release-artifacts/
       - name: Check installed packages on Node 22
-        if: matrix.id != 'linux-x64-musl'
+        if: matrix.libc != 'musl'
         shell: bash
         run: |
           cp target/release-artifacts/yq.wasm js/yq.wasm
@@ -179,10 +179,10 @@ jobs:
           export YQ_TEST_NATIVE_ADDON_PACKAGE="$PWD/target/release-artifacts/yq.rs-${{ matrix.id }}-napi-$version.tgz"
           node js/package-test.mjs node
       - name: Check installed packages on Alpine
-        if: matrix.id == 'linux-x64-musl'
+        if: matrix.libc == 'musl'
         shell: bash
         run: |
-          docker run --rm -v "$PWD:/work" -w /work node:22.23.3-alpine sh .github/release/smoke_alpine.sh
+          docker run --rm -v "$PWD:/work" -w /work node:22.23.3-alpine sh .github/release/smoke_alpine.sh '${{ matrix.id }}'
 
   publish:
     if: github.event_name == 'push' && github.ref_type == 'tag'

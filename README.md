@@ -366,9 +366,11 @@ continues to receive these capabilities only through explicit options.
 Input `filename` remains empty; `fileIndex` tracks the input position.
 
 The npm launcher resolves one platform package and runs its native binary
-with inherited stdio. It loads wasm only when the native package is absent.
+with inherited stdio. It loads wasm when the native package is absent or
+the binary cannot be started. An executed binary's exit status or signal is
+propagated without retrying the evaluation.
 Supported prebuilds are macOS arm64/x64, Linux x64/arm64 with glibc 2.28 or
-newer, Linux x64 with musl, and Windows x64. Each has a CLI package
+newer, Linux x64/arm64 with musl, and Windows x64. Each has a CLI package
 `yq.rs-<platform>` and a separate library addon `yq.rs-<platform>-napi`.
 Optional dependencies are pinned to the exact meta-package version; installs
 using `--omit=optional` use wasm. There are no install-time downloads or
@@ -688,12 +690,12 @@ It updates the workspace, platform manifests, exact optional dependencies
 and lockfiles together; review and commit the result before tagging.
 Workspace Cargo, npm and lockfile versions must agree. A pushed `vX.Y.Z`
 tag must match that version and runs verification before publishing
-`yq-core` to crates.io and 13 npm packages: `yq.rs`, six CLI packages, and
-six Node-API addon packages. The publish job compares
+`yq-core` to crates.io and 15 npm packages: `yq.rs`, seven CLI packages, and
+seven Node-API addon packages. The publish job compares
 the Cargo archive with the verified artifact, publishes the verified npm
 tarballs with provenance, attests the release artifacts, and attaches wasm,
 native binaries, addons and package archives with SHA256SUMS to the GitHub
-release. The six-platform matrix uses pinned cargo-zigbuild and Zig for
+release. The seven-platform matrix uses pinned cargo-zigbuild and Zig for
 Linux and native macOS/Windows runners. Node 22 tests the installed native
 and fallback entries on each platform, including an Alpine container for musl.
 Platform packages publish first; the job waits until their registry metadata
@@ -702,17 +704,46 @@ It also waits for the meta package before creating the GitHub release. Release n
 the conformance count and module size. A retried release skips a registry
 only when its already-published bytes match the verified artifact.
 
-First publication requires repository secrets `CARGO_REGISTRY_TOKEN` and
-`NPM_TOKEN` with permission to create their respective packages. After the
-packages exist, configure each registry's trusted publisher for owner
-`taras`, repository `yq.rs`, workflow `release.yml` and environment `release`;
-npm must allow direct publishing. Configure all 13 npm package names
-individually; trusting the meta package does not cover platform packages.
-New package names can enter npm's staged-publication hold, so the first
-release can take an additional half hour or more. The workflow waits up to
-one hour per publication phase and fails if packages do not become available;
-reruns verify existing package bytes before skipping them. Subsequent releases can use OIDC without
-long-lived registry tokens. See the official
+Before the first `0.1.3` tag, bootstrap the 14 new platform package names.
+npm trusted publishers can be configured only after the packages exist.
+Use the verified `0.1.2` platform tarballs from the merged commit's CI run:
+
+1. Download that run's `release-inputs-<commit>` artifact into
+   `target/release-artifacts`. Check its `SHA256SUMS` before publishing.
+2. Sign in interactively with `npm login` and publish each of the 14 platform
+   archives, completing npm's authentication or staged-publish prompts:
+
+   ```bash
+   for archive in target/release-artifacts/yq.rs-*-0.1.2.tgz; do
+     npm publish "$archive" --access public --ignore-scripts
+   done
+   ```
+
+   Publish only the platform archives. The `yq.rs` meta package and
+   `yq-core` version `0.1.2` already exist and must not be republished.
+3. Wait for every platform version to become available. First publications
+   can spend an additional half hour or more in npm processing; budget an
+   afternoon for bootstrap and publisher configuration.
+4. For each new package, configure GitHub owner `taras`, repository `yq.rs`,
+   workflow `release.yml`, environment `release`, and enable **Direct npm
+   publish**. The existing meta package needs its own trusted publisher too.
+5. Prepare and merge the `0.1.3` version change, then push its tag. All 15 npm
+   packages can now publish from CI using OIDC and provenance without a
+   long-lived npm token.
+
+The manual bootstrap versions do not receive npm's CI provenance; the
+subsequent `0.1.3` workflow publishes the release versions with provenance.
+Alternatively, a bootstrap `NPM_TOKEN` secret with permission to create all
+new names can handle their first publication in CI; publisher setup remains
+per package and is needed before removing that credential. Creating the
+`yq-core` package initially requires a crates.io publishing credential;
+existing packages can use their configured trusted publisher.
+
+The workflow waits up to one hour per publication phase for versions to
+become available. It verifies already-published bytes before skipping them
+on retry. If bootstrapping from a failed tag run instead, manually publish
+its exact verified archives and rerun only the failed publish job; rebuilding
+archives can change their bytes and defeat the integrity check. See the
 [crates.io setup](https://crates.io/docs/trusted-publishing) and
 [npm setup](https://docs.npmjs.com/trusted-publishers/).
 

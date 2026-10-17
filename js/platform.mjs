@@ -1,4 +1,11 @@
-export function platformTarget(platform = process.platform, arch = process.arch, report = () => process.report?.getReport()) {
+function runtimeReport() {
+  if (process.report) {
+    process.report.excludeNetwork = true;
+    return process.report.getReport();
+  }
+}
+
+export function platformTarget(platform = process.platform, arch = process.arch, report = runtimeReport) {
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) {
     return `${platform}-${arch}`;
   }
@@ -10,9 +17,7 @@ export function platformTarget(platform = process.platform, arch = process.arch,
     if (glibc) {
       return `linux-${arch}-gnu`;
     }
-    if (arch === "x64") {
-      return "linux-x64-musl";
-    }
+    return `linux-${arch}-musl`;
   }
   return undefined;
 }
