@@ -50,6 +50,8 @@ pub struct EvalOptions {
     /// Print scalar results bare, without quotes, styles or comments (yq's
     /// `-r`). `None` follows yq's default: on for YAML output, off for JSON.
     pub unwrap_scalar: Option<bool>,
+    /// Emit YAML document separators between results from different documents.
+    pub print_doc_separators: bool,
 }
 
 impl Default for EvalOptions {
@@ -63,6 +65,7 @@ impl Default for EvalOptions {
             now: None,
             files: Vec::new(),
             unwrap_scalar: None,
+            print_doc_separators: true,
         }
     }
 }
@@ -93,15 +96,105 @@ impl std::error::Error for Error {}
 /// # Ok::<(), yq_core::Error>(())
 /// ```
 pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<String, Error> {
+    evaluate_with_status(expression, input, options).map(|result| result.output)
+}
+
+/// Printed results and the match status used by yq's `--exit-status` flag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Evaluation {
+    pub output: String,
+    /// True when at least one result is neither null nor the boolean false.
+    pub matched: bool,
+}
+
+/// Like [`evaluate`], also reporting whether any truthy result was printed.
+/// String values such as `"false"` and `"null"` count as matches.
+pub fn evaluate_with_status(
+    expression: &str,
+    input: &str,
+    options: &EvalOptions,
+) -> Result<Evaluation, Error> {
+    evaluate_sequence_with_status(expression, &[input], options).map_err(|failure| failure.error)
+}
+
+/// An evaluation failure together with output produced by preceding inputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SequenceError {
+    pub output: String,
+    pub error: Error,
+}
+
+impl std::fmt::Display for SequenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for SequenceError {}
+
+/// Evaluate each input independently, sharing only the result printer.
+///
+/// This implements sequential `yq eval`, not `eval-all`: variables and collected
+/// nodes do not cross input boundaries. Input indices supply `fileIndex`, while
+/// `filename` is empty. A failure retains output printed before it. With `null_input`, the expression is evaluated once without inputs.
+pub fn evaluate_sequence_with_status(
+    expression: &str,
+    inputs: &[&str],
+    options: &EvalOptions,
+) -> Result<Evaluation, SequenceError> {
+    let mut printer = printer::Printer::new(printer::PrinterPrefs {
+        format: options.output_format,
+        indent: options.indent,
+        unwrap_scalar: options
+            .unwrap_scalar
+            .unwrap_or(options.output_format == Format::Yaml),
+        print_doc_separators: options.print_doc_separators,
+    });
+    let null_inputs = [""];
+    let inputs = if options.null_input {
+        &null_inputs[..]
+    } else {
+        inputs
+    };
+    for (file_index, input) in inputs.iter().enumerate() {
+        let result = evaluate_input(expression, input, options, file_index, &mut printer);
+        if let Err(error) = result {
+            return Err(SequenceError {
+                output: printer.into_output(),
+                error,
+            });
+        }
+    }
+    let matched = printer.printed_matches();
+    Ok(Evaluation {
+        output: printer.into_output(),
+        matched,
+    })
+}
+
+fn evaluate_input(
+    expression: &str,
+    input: &str,
+    options: &EvalOptions,
+    file_index: usize,
+    printer: &mut printer::Printer,
+) -> Result<(), Error> {
     let mut arena = node::Arena::new();
     let inputs = if options.null_input {
         vec![arena.push(node::Node::scalar("!!null", ""))]
     } else {
         match options.input_format {
-            Format::Yaml => yaml::decode::decode_documents(&mut arena, input, "", 0)?,
+            Format::Yaml => yaml::decode::decode_documents(&mut arena, input, "", file_index)?,
             Format::Json => json::decode::decode_documents(&mut arena, input)?,
         }
     };
+    if options.input_format == Format::Json {
+        for node in &inputs {
+            arena.get_mut(*node).file_index = file_index;
+        }
+    }
     let parsed = parser::parse_expression(expression)?;
     let mut evaluator = eval::Evaluator::new(arena);
     evaluator.env = options.env.clone();
@@ -109,15 +202,7 @@ pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<
     evaluator.files = options.files.clone();
     let results =
         evaluator.get_matching_nodes_opt(context::Context::new(inputs), parsed.as_ref())?;
-    let mut printer = printer::Printer::new(printer::PrinterPrefs {
-        format: options.output_format,
-        indent: options.indent,
-        unwrap_scalar: options
-            .unwrap_scalar
-            .unwrap_or(options.output_format == Format::Yaml),
-        print_doc_separators: true,
-    });
     let nodes = results.nodes().to_vec();
     printer.print_results(&mut evaluator.arena, &nodes)?;
-    Ok(printer.into_output())
+    Ok(())
 }

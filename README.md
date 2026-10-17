@@ -11,7 +11,7 @@ query and transform objects with yq syntax without shipping the Go yq's
 need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
 with 10 skipped for XML/JSON-only decoders. The optimized release module is
-466,854 bytes (203,682 bytes gzipped), within the 2 MB / 700 KB budget.
+468,387 bytes (204,486 bytes gzipped), within the 2 MB / 700 KB budget.
 The package's smoke tests run under Node and Bun.
 
 ## Scope
@@ -45,10 +45,12 @@ The package's smoke tests run under Node and Bun.
 - `fix_merge_anchor_to_spec`, `disable_env_ops` and `disable_file_ops`
   exist on the internal `Evaluator`, but are not exposed through
   `EvalOptions`, wasm options or CLI flags.
-- The thin CLI does not implement front-matter extraction, split-file
-  output, in-place editing, multi-file evaluation or most Go CLI flags.
-  Public evaluation calls have no input filename or file-index options, so
-  input documents report an empty `filename` and `file_index` zero.
+- The npm CLI does not implement `eval-all`/`ea`, front-matter extraction,
+  header preprocessing, split-file output or the merge-anchor compatibility
+  flag. Dynamic `load` paths are unsupported; literal file paths are preloaded.
+  Single-input calls report an empty `filename` and `fileIndex` zero.
+  Sequential input evaluation supplies the input index as `fileIndex`;
+  filenames remain empty.
 
 The host supplies environment variables, the current time and file contents
 through options; the engine has no filesystem, clock or process environment
@@ -63,9 +65,10 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 | Path | Purpose |
 |---|---|
 | `crates/yq-core` | The engine. Pure Rust, no I/O, no platform dependencies. |
-| `crates/yq-wasm` | `cdylib` with a hand-written ABI (`yq_alloc`, `yq_eval`, `yq_free`, `yq_result_free`). No wasm-bindgen. |
+| `crates/yq-wasm` | `cdylib` with a hand-written ABI for evaluation, match status and memory management. No wasm-bindgen. |
 | `crates/yq-cli` | `yq-rs`, a thin CLI for diffing against the reference yq locally. |
-| `js/` | Wasm loader, inline package build, declarations and installed-package smoke tests. |
+| `js/` | Wasm loader, inline package build, declarations and installed-package tests. |
+| `bin/yq.js` | Node/Bun CLI source, packaged as `dist/cli.mjs`. |
 | `crates/yq-core/tests/fixtures` | The conformance fixture and its format description, included in the published crate. |
 
 ## Quick start
@@ -87,11 +90,12 @@ Check the wasm size against the 2 MB uncompressed / 700 KB gzipped budget:
 
 ```bash
 wc -c < js/yq.wasm
-gzip -9 -c js/yq.wasm | wc -c
+gzip -n -9 -c js/yq.wasm | wc -c
 ```
 
 `npm test` packs and installs the built package in an isolated directory,
-then exercises its inline and raw entries under both Node and Bun. Use
+then exercises its inline and raw entries and installed `yq` executable
+under both Node and Bun. Use
 `npm run smoke:node` or `npm run smoke:bun` to test a single runtime.
 
 For local CLI use:
@@ -129,10 +133,11 @@ fn main() -> Result<(), yq_core::Error> {
 ```
 
 `EvalOptions` is non-exhaustive: start with `Default` and set the fields you
-need. The supported public API is `evaluate`, `EvalOptions`, `Format` and
-`Error`. Engine modules are private; the doc-hidden conformance harness
-exists for the upstream tests and is outside that API. Rust 1.87 or newer
-is required.
+need. The supported public API is `evaluate`, `evaluate_with_status`,
+`evaluate_sequence_with_status`, `Evaluation`, `SequenceError`,
+`EvalOptions`, `Format` and `Error`. Engine modules are private; the
+doc-hidden conformance harness exists for the upstream tests and is outside
+that API. Rust 1.87 or newer is required.
 
 ## Using the module
 
@@ -159,8 +164,8 @@ isolated.evaluate(".name", "name: Ada\n");          // "Ada\n"
 The primary import embeds wasm as base64: it needs no file access or
 TypeScript runtime support. It exports a ready `yq` instance and an async
 `createYq()` factory for independent instances. `yq.rs/inline`
-provides the same entry. No CLI binary is included; CLI parity remains a
-separate decision.
+provides the same entry. The package also installs the `yq` executable
+for Node and Bun.
 
 For bundlers or hosts that load wasm themselves, use the raw asset and
 explicit loader:
@@ -177,7 +182,19 @@ The explicit loader also accepts a compiled `WebAssembly.Module`; bundlers
 can resolve `yq.rs/yq.wasm` as an asset URL. The module
 instantiates with an empty import object.
 `evaluate` returns the printed output and throws `YqError` on evaluation
-errors.
+errors. `evaluateWithStatus` returns `{ output, matched }`, where `matched`
+means at least one result is neither null nor boolean false. Rust exposes
+the same result through `evaluate_with_status`. This distinguishes the
+string `"false"` from boolean `false` even when their printed output matches.
+
+`evaluateSequenceWithStatus(expression, inputs, options)` accepts an array
+of input strings. It evaluates each independently with a shared printer, so
+file separators follow result-node metadata. Variables and collected nodes
+do not cross input boundaries; this is sequential `eval`, not `eval-all`.
+`fileIndex` is the input position and `filename` is empty. Rust exposes this
+as `evaluate_sequence_with_status`. A later failure returns earlier printed
+output in `SequenceError.output`, or `YqError.output` in JavaScript. With
+`nullInput`, the expression is evaluated once, ignoring the input array.
 
 Pass external values explicitly through options:
 
@@ -208,9 +225,69 @@ API exposes the same settings through `EvalOptions` using snake_case names.
 | `indent` | number | 2 | Output indentation. |
 | `nullInput` | boolean | false | Evaluate against a single null document. |
 | `unwrapScalar` | boolean | true for YAML, false for JSON | Print scalar results bare (yq's `-r`). |
+| `printDocSeparators` | boolean | true | Emit YAML document separators; false implements `-N`. |
 | `env` | object of strings | `{}` | Values for `env`, `strenv` and `envsubst`. |
 | `now` | RFC 3339 string | unset | Value of `now`; unset makes it an error. |
 | `files` | object of strings | `{}` | File contents for `load`, `load_str`, `load_props` and `load_base64`. |
+
+## Command line
+
+Install locally for npm/Bun scripts, or globally:
+
+```bash
+npm install --save-dev yq.rs
+npx yq '.name' config.yml
+npx yq -i '.version = "2.0"' package.json
+printf 'items: [1, 2]\n' | npx yq -o json '.items'
+# package.json scripts resolve the local yq executable automatically:
+# "query": "yq '.name' config.yml"
+# or: npm install --global yq.rs
+```
+
+`yq [eval|e] <expression> [files...]` evaluates files independently, reading
+stdin when no file is supplied or a filename is `-`. `--expression` forces
+an expression and `--from-file` loads it from a file. `-i`/`--inplace` writes
+the combined results into the first input file, preserving its permissions.
+YAML comments, anchors and scalar styles follow the engine's normal output.
+
+Supported flags are `-p`/`--input-format`, `-o`/`--output-format` (YAML/JSON),
+`-I`/`--indent`, `-n`/`--null-input`, `-r`/`--unwrapScalar` (including `=false`),
+`-e`/`--exit-status`, and `-N`/`--no-doc`. JSON filenames select JSON input
+and output by default; other filenames and stdin default to YAML. An explicit
+input format defaults output to YAML unless an output format is also set.
+`-M` and `-C` are accepted; output has no ANSI colors. `--help` lists the
+supported and deferred behavior; `--version` reports the npm package version
+and pinned Go yq version. Unlike Go yq, explicit input format flags do not
+emit the timestamped compatibility warning about output defaults. Exit
+status is 1 for errors and, with `-e`, when
+all results are null/false or no results were produced.
+
+The CLI supplies `process.env` and the current clock value. It preloads
+string-literal paths used in `load`, `load_str`, `load_props` and
+`load_base64`; computed and interpolated load paths fail clearly. The library
+continues to receive these capabilities only through explicit options.
+
+`eval-all`/`ea`, split-file output, front matter, header preprocessing,
+`--yaml-fix-merge-anchor-to-spec`, and other document formats are unsupported.
+Input `filename` remains empty; `fileIndex` tracks the input position. The Rust
+`yq-rs` executable is a local comparison tool; the npm `yq` executable is the
+supported automation interface.
+
+Run installed-package CLI comparisons against the pinned Go oracle with:
+
+```bash
+(cd ref/yq && go build -o ../yq-ref .)
+npm run test:cli
+# An external oracle path can be supplied with YQ_REFERENCE=/path/to/yq.
+# Add -- node or -- bun to test a single runtime.
+```
+
+This command requires the oracle and compares stdout, stderr, exit status,
+and in-place output. Decoder error wording can differ from Go outside the
+conformance fixture; the tests check retained output and failure status
+separately for those cases. The regular `npm test` also tests the installed
+CLI on both runtimes without requiring Go. CI also builds the pinned Go
+oracle with Go 1.26.0 and runs the full comparison command.
 
 ## Performance
 
@@ -381,10 +458,15 @@ Exports from `crates/yq-wasm`:
 | `yq_alloc` | `(len: u32) -> ptr` | Allocate an argument buffer. |
 | `yq_free` | `(ptr, len)` | Release an argument buffer. |
 | `yq_eval` | `(expr_ptr, expr_len, input_ptr, input_len, opts_ptr, opts_len) -> header_ptr` | Evaluate UTF-8 expression, input and JSON options. |
+| `yq_eval_with_status` | Same arguments as `yq_eval` | Also reports successful evaluation without truthy matches as status 2. |
+| `yq_eval_sequence` | Same arguments as `yq_eval` | Input is an ordered JSON object of string values evaluated independently with shared printing. |
 | `yq_result_free` | `(header_ptr)` | Release a result and its header. |
 
 The result header is 12 bytes, little-endian: `status: u32` (0 for success,
-1 for error), `ptr: u32`, `len: u32`. Result bytes contain UTF-8 output or
+1 for error; `yq_eval_with_status` additionally uses 2 for success without
+truthy matches; `yq_eval_sequence` uses the same statuses plus 3 for partial
+failure), `ptr: u32`, `len: u32`. Status 3 contains a UTF-8 JSON object
+`{ "output": "...", "error": "..." }`; other result bytes contain output or
 error text. The host copies them, calls `yq_result_free`, then releases its
 argument buffers with `yq_free`. Memory can grow during calls, so the host
 must re-read `memory.buffer` before accessing it again. `js/yq.ts`
