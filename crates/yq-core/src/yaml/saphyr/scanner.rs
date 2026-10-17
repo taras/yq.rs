@@ -1836,7 +1836,7 @@ impl<'input, T: Input> Scanner<'input, T> {
                 .push(ImplicitMappingState::Possible);
         }
 
-        self.skip_ws_to_eol(SkipTabs::Yes)?;
+        self.skip_blanks_keep_comment(true);
 
         self.tokens
             .push_back(Token(Span::new(start_mark, self.mark), tok));
@@ -1862,7 +1862,7 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         let start_mark = self.mark;
         self.skip_non_blank();
-        self.skip_ws_to_eol(SkipTabs::Yes)?;
+        self.skip_blanks_keep_comment(true);
 
         // A flow collection within a flow mapping can be a key. In that case, the value may be
         // adjacent to the `:`.
@@ -1887,7 +1887,7 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         let start_mark = self.mark;
         self.skip_non_blank();
-        self.skip_ws_to_eol(SkipTabs::Yes)?;
+        self.skip_blanks_keep_comment(true);
 
         self.tokens.push_back(Token(
             Span::new(start_mark, self.mark),

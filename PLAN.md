@@ -45,7 +45,10 @@ Done when: `cargo test` reports the harness running every scenario and
 evaluation of `.` passes for every scenario whose expression is `.` or that
 only needs identity. Expected count: 20 to 40.
 
-### 2. Lexer, postfix, expression tree, core operators
+### 2. Lexer, postfix, expression tree, core operators — done
+
+Landed 2026-10-17 (644 of 1,111 on its own; every target group above
+90% once the milestone 3 operators they lean on existed).
 
 Port `lexer_participle.go` (token table with the same rule order, since
 order resolves ambiguity), `expression_postfix.go` (shunting yard with
@@ -65,7 +68,15 @@ equals, compare, select, collect, collectObject, createMap, variables,
 recursiveDescent, delete and keys groups are each above 90%.
 Expected count: 500 to 600.
 
-### 3. The long tail
+### 3. The long tail — done
+
+Landed 2026-10-17: 1,062 of 1,111 with every group except `load`,
+`shuffle` and comments above 90%. `regex-lite` handles every pattern in
+the fixture. Not ported: `load`/`load_str` (no filesystem; they return
+yq's security error when file operations are disabled and a clear error
+otherwise), `system` (returns yq's disabled error), `shuffle` (Go's
+`math/rand` sequence would have to be reproduced bit for bit), and the
+XML, TOML, HCL, Lua and INI formats.
 
 entries (to/from/with), sort, sort_by, sort_keys, reverse, unique,
 unique_by, group_by, min, max, flatten, any, all, any_c, all_c, contains,
@@ -84,7 +95,13 @@ which fixture patterns it rejects before choosing `regex` instead.
 Done when: every group except comments, anchors/aliases, style and load
 is above 90%. Expected count: 850 to 950.
 
-### 4. wasm module and loader
+### 4. wasm module and loader — done except Bun/Node runs
+
+Release wasm on 2026-10-17: 518 KB uncompressed, 206 KB gzipped (no
+`wasm-opt` on this machine). `js/smoke.ts` passes under Deno; Bun and
+Node were not available to try. `yq-core` has no `unwrap`/`expect` outside
+tests; expression nesting is capped at 2,000 levels to keep recursion
+bounded.
 
 - `scripts/build-wasm.sh` produces `js/yq.wasm`; record size here.
 - `js/smoke.ts` passes under Deno, Bun and Node.
@@ -94,7 +111,11 @@ is above 90%. Expected count: 850 to 950.
 - Size budget: 2 MB uncompressed, 700 KB gzipped. If over, profile with
   `twiggy` or `cargo bloat` before cutting features.
 
-### 5. Fidelity
+### 5. Fidelity — done except `load`
+
+Landed 2026-10-17: 1,092 of 1,111. Comments, anchors, aliases and styles
+all pass; the 19 remaining scenarios are `load` (13, plus 2 in multiply)
+and `shuffle` (3, plus 1 in delete).
 
 - Comment preservation: head, line and foot comments through decode,
   operators and encode. This needs a comment-aware YAML scanner, since no
@@ -139,6 +160,30 @@ Target: above 1,050 of 1,111.
   parser (`anchor_name`), and collection start events report block vs flow
   style (`last_start_was_flow`). Both are needed by the decoder and neither
   is in the upstream API.
+- 2026-10-17: Comments. Rather than a new scanner, go-yaml's comment
+  logic (`scanComments`, `scanLineComment`, the comment-aware
+  `unrollIndent`, the two-token lookahead, `UnfoldComments`,
+  `splitStemComment`, `setEventComments`) was ported into the vendored
+  saphyr scanner and parser. Two things matter for fidelity: go-yaml's
+  `for` loop increments `peek` on `continue`, so the line break that ends
+  a comment line is never examined (it only becomes a foot comment when a
+  blank line or a dedent follows); and go-yaml's columns are 1-based with
+  `scanComments` recording them one past the character, which the Rust
+  port keeps (`go_indent()` converts the scanner's 0-based block indent).
+  The composer rules for moving foot comments between keys, values and
+  mappings live in `yaml/decode.rs`.
+- 2026-10-17: The Go test suite flips `FixMergeAnchorToSpec` on for the
+  `fixed*` groups and `DisableEnvOps`/`DisableFileOps` for the
+  `*SecurityDisabled*` groups; the conformance runner sets the matching
+  `Evaluator` flags from the group name.
+- 2026-10-17: A Go `Context` passed by value shares its variables map, so
+  a variable set inside an operator (the decode operator records the
+  original node under `decoded: <key>`) is visible to the caller. The Rust
+  `Context` keeps the map behind `Rc<RefCell>`; `clone_context()` shares it
+  and `child_context()` copies it, matching Go's `ChildContext`.
+- 2026-10-17: The legacy merge-anchor explode reproduces a Go bug: for
+  `<<: [*a, *b]` the index passed to `applyAlias` is the position inside
+  the alias list (a shadowed loop variable), which changes key order.
 - 2026-10-16: `target/conformance-report.txt` always records document,
   expected and actual for each failure; `YQ_CONFORMANCE_VERBOSE` only
   affects stdout. The unattended permission allowlist rejects commands with
