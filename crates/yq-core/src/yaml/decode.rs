@@ -176,6 +176,8 @@ struct Decoder<'a, 'input> {
 
 impl<'a, 'input> Decoder<'a, 'input> {
     fn new(arena: &'a mut Arena, text: &'input str) -> Self {
+        // go-yaml detects the encoding BOM after yq's header preprocessing.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         Decoder {
             arena,
             parser: Parser::new_from_str(text),

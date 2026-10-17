@@ -11,7 +11,7 @@ query and transform objects with yq syntax without shipping the Go yq's
 need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
 with 10 skipped for XML/JSON-only decoders. The optimized release module is
-468,387 bytes (204,486 bytes gzipped), within the 2 MB / 700 KB budget.
+468,429 bytes (204,498 bytes gzipped), within the 2 MB / 700 KB budget.
 The package's smoke tests run under Node and Bun.
 
 ## Scope
@@ -492,6 +492,12 @@ uses block collections and configured indentation by default, and prints
 `true`/`false` are booleans; `yes`/`no` are strings; numeric forms, nulls,
 timestamps and merge keys retain the reference tags. Quoted scalars resolve
 as strings unless explicitly tagged otherwise.
+
+A single UTF-8 BOM at the start of the YAML decoder's stream is consumed
+after leading-content preprocessing, matching the pinned Go decoder.
+In-stream BOMs and U+FEFF inside scalar values remain content. JSON input
+rejects a leading BOM, matching Go's JSON decoder. The JavaScript loader
+also preserves U+FEFF at the start of printed results.
 
 `saphyr-parser` is vendored under `yaml/saphyr/` (MIT OR Apache-2.0). The decoder needs
 anchor names (`anchor_name`) and block/flow collection styles

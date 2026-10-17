@@ -62,7 +62,8 @@ export async function createYq(source: BufferSource | WebAssembly.Module): Promi
   const instance = await WebAssembly.instantiate(module, {});
   const exports = instance.exports as unknown as Exports;
   const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  // A result's leading U+FEFF is scalar content, not a transport BOM.
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
   // The memory buffer is detached whenever wasm memory grows, so it must be
   // re-read after every call into the module.
