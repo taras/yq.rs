@@ -1,5 +1,5 @@
 {
-  "name": "@executablemd/yq",
+  "name": "yq.rs",
   "version": "0.1.0",
   "description": "YAML and JSON queries with yq-compatible semantics, powered by Rust and WebAssembly",
   "type": "module",

@@ -2,20 +2,20 @@ import assert from "node:assert/strict";
 import { readFile, rename } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const wasmPath = fileURLToPath(import.meta.resolve("@executablemd/yq/yq.wasm"));
+const wasmPath = fileURLToPath(import.meta.resolve("yq.rs/yq.wasm"));
 const bytes = await readFile(wasmPath);
 const hiddenPath = `${wasmPath}.hidden`;
 let inline;
 await rename(wasmPath, hiddenPath);
 try {
-  inline = await import("@executablemd/yq");
-  const alias = await import("@executablemd/yq/inline");
+  inline = await import("yq.rs");
+  const alias = await import("yq.rs/inline");
   assert.equal(alias.yq, inline.yq);
 } finally {
   await rename(hiddenPath, wasmPath);
 }
 
-const loader = await import("@executablemd/yq/loader");
+const loader = await import("yq.rs/loader");
 assert.deepEqual(WebAssembly.Module.imports(await WebAssembly.compile(bytes)), []);
 assert.equal(inline.YqError, loader.YqError);
 

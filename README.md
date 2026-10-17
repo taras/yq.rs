@@ -139,12 +139,12 @@ is required.
 Install the same package in Node or Bun:
 
 ```bash
-npm install @executablemd/yq
-# or: bun add @executablemd/yq
+npm install yq.rs
+# or: bun add yq.rs
 ```
 
 ```ts
-import { yq, createYq } from "@executablemd/yq";
+import { yq, createYq } from "yq.rs";
 
 yq.evaluate(".a.b[0]", "a:\n  b: [1, 2]\n");          // "1\n"
 yq.evaluate(".[] | .name", '[{"name":"Ada"}]', {
@@ -158,7 +158,7 @@ isolated.evaluate(".name", "name: Ada\n");          // "Ada\n"
 
 The primary import embeds wasm as base64: it needs no file access or
 TypeScript runtime support. It exports a ready `yq` instance and an async
-`createYq()` factory for independent instances. `@executablemd/yq/inline`
+`createYq()` factory for independent instances. `yq.rs/inline`
 provides the same entry. No CLI binary is included; CLI parity remains a
 separate decision.
 
@@ -167,14 +167,14 @@ explicit loader:
 
 ```ts
 import { readFile } from "node:fs/promises";
-import { createYq } from "@executablemd/yq/loader";
+import { createYq } from "yq.rs/loader";
 
-const bytes = await readFile(new URL(import.meta.resolve("@executablemd/yq/yq.wasm")));
+const bytes = await readFile(new URL(import.meta.resolve("yq.rs/yq.wasm")));
 const yq = await createYq(bytes);
 ```
 
 The explicit loader also accepts a compiled `WebAssembly.Module`; bundlers
-can resolve `@executablemd/yq/yq.wasm` as an asset URL. The module
+can resolve `yq.rs/yq.wasm` as an asset URL. The module
 instantiates with an empty import object.
 `evaluate` returns the printed output and throws `YqError` on evaluation
 errors.

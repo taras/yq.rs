@@ -33,9 +33,9 @@ try {
     cwd: fixture,
   });
   await copyFile(new URL("./smoke.mjs", import.meta.url), join(fixture, "smoke.mjs"));
-  await writeFile(join(fixture, "consumer.mts"), `import { createYq, yq, YqError, type EvalOptions, type Yq } from "@executablemd/yq";
-import { createYq as createInline } from "@executablemd/yq/inline";
-import { createYq as loadBytes } from "@executablemd/yq/loader";
+  await writeFile(join(fixture, "consumer.mts"), `import { createYq, yq, YqError, type EvalOptions, type Yq } from "yq.rs";
+import { createYq as createInline } from "yq.rs/inline";
+import { createYq as loadBytes } from "yq.rs/loader";
 const options: EvalOptions = { inputFormat: "yaml", outputFormat: "json", indent: 2, nullInput: false, unwrapScalar: false, env: { A: "b" }, now: "2026-10-17T00:00:00Z", files: { "a.yml": "a: b" } };
 const instance: Yq = await createYq();
 yq.evaluate(".", "a: b", options);
@@ -52,7 +52,7 @@ await createYq(new Uint8Array());
     cwd: fixture,
     stdio: "inherit",
   });
-  const metadata = JSON.parse(await readFile(join(fixture, "node_modules/@executablemd/yq/package.json"), "utf8"));
+  const metadata = JSON.parse(await readFile(join(fixture, "node_modules/yq.rs/package.json"), "utf8"));
   assert.equal(metadata.bin, undefined);
   for (const runtime of runtimes) {
     execFileSync(runtime === "node" ? process.execPath : runtime, [join(fixture, "smoke.mjs")], {
