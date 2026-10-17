@@ -1,0 +1,26 @@
+yq {version} — YAML and JSON queries (Go yq v4.54.1 (a814ff5))
+
+Usage: yq [eval|e] [flags] <expression> [files...]
+Read stdin when no file is given or a file is '-'. Evaluate files independently.
+
+  --expression EXPR       Set the expression explicitly
+  --from-file FILE        Read the expression from a file
+  -i, --inplace           Write all results into the first input file
+  -p, --input-format FMT  yaml/y or json/j (default: filename extension)
+  -o, --output-format FMT yaml/y or json/j (default: filename extension)
+  -I, --indent N          Indentation (default: 2)
+  -n, --null-input        Evaluate once without reading input
+  -r, --unwrapScalar     Print scalar values bare (YAML default; =false disables)
+  -e, --exit-status       Exit 1 if all results are null/false or there are no results
+  -N, --no-doc            Omit YAML document separators
+  -M, --no-colors         Accepted; output has no colors
+  -C, --colors            Accepted; output has no colors
+  -h, --help              Show this help
+  -V, --version           Show package and reference yq versions
+
+Environment variables and the clock are supplied by Node/Bun. File loading
+supports literal paths in load, load_str, load_props and load_base64 only.
+
+Unsupported: eval-all/ea, dynamic load paths, split-exp, front-matter,
+header-preprocess, yaml-fix-merge-anchor-to-spec, and document formats other
+than YAML/JSON. filename is empty; fileIndex is the input position.

@@ -7,15 +7,16 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const requested = process.argv.slice(2);
-const runtimes = requested.length === 0 ? ["node", "bun"] : requested;
+const runtimes = requested.length === 0 ? ["node", "bun", "native"] : requested;
 for (const runtime of runtimes) {
-  assert.ok(runtime === "node" || runtime === "bun", `Unsupported CLI test runtime: ${runtime}`);
+  assert.ok(runtime === "node" || runtime === "bun" || runtime === "native", `Unsupported CLI test runtime: ${runtime}`);
 }
 const reference = resolve(root, process.env.YQ_REFERENCE ?? "ref/yq-ref");
 const environment = { ...process.env, NO_COLOR: "1", TERM: "dumb", YQ_CLI_TEST_NUMBER: "42", YQ_CLI_TEST_TEXT: "hello world", YQ_CLI_TEST_SPECIAL: 'quoted "braces {and}"\b\f' };
 delete environment.FORCE_COLOR;
 const fixture = await mkdtemp(join(tmpdir(), "yq-cli-"));
 let checks = 0;
+const wasmResults = new Map();
 
 function run(command, args, input = "", cwd = fixture) {
   const result = spawnSync(command, args, { input, cwd, env: environment, encoding: "utf8", timeout: 30_000 });
@@ -186,16 +187,23 @@ try {
   ];
 
   for (const runtime of runtimes) {
-    const command = runtime === "node" ? process.execPath : runtime;
-    const cli = (args, text = "", cwd = fixture) => run(command, [entry, ...args], text, cwd);
+    const command = runtime === "native" ? resolve(root, process.env.YQ_NATIVE ?? `target/release/yq${process.platform === "win32" ? ".exe" : ""}`) : runtime === "node" ? process.execPath : runtime;
+    const commandArgs = args => runtime === "native" ? args : [entry, ...args];
+    const cli = (args, text = "", cwd = fixture) => run(command, commandArgs(args), text, cwd);
     for (const args of [[".", "large.yml"], ["--help"]]) {
       const expected = await runWithClosedStdout(reference, args);
       assert.deepEqual(expected, { status: 141, stderr: "" }, "Go must exit silently on a broken pipe");
-      assert.deepEqual(await runWithClosedStdout(command, [entry, ...args]), expected, `${runtime}: broken pipe ${args.join(" ")}`);
+      assert.deepEqual(await runWithClosedStdout(command, commandArgs(args)), expected, `${runtime}: broken pipe ${args.join(" ")}`);
       checks += 1;
     }
     for (const [name, args, text = ""] of cases) {
-      assert.deepEqual(cli(args, text), run(reference, args, text), `${runtime}: ${name}`);
+      const actual = cli(args, text);
+      assert.deepEqual(actual, run(reference, args, text), `${runtime}: ${name}`);
+      if (wasmResults.has(name)) {
+        assert.deepEqual(actual, wasmResults.get(name), `${runtime}: ${name} must match the wasm CLI`);
+      } else {
+        wasmResults.set(name, actual);
+      }
       checks += 1;
     }
     // Parser diagnostic wording differs from Go; retain exact streaming and failure behavior.
@@ -212,6 +220,11 @@ try {
       assert.equal(actual.status, expected.status, `${runtime}: ${name} exit status`);
       assert.equal(actual.stdout, expected.stdout, `${runtime}: ${name} partial output`);
       assert.match(actual.stderr, /^Error: .+\n$/s, `${runtime}: ${name} diagnostic`);
+      if (wasmResults.has(name)) {
+        assert.deepEqual(actual, wasmResults.get(name), `${runtime}: ${name} must match the wasm CLI`);
+      } else {
+        wasmResults.set(name, actual);
+      }
       checks += 1;
     }
     for (const flag of ["--help", "-h"]) {
