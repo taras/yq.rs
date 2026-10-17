@@ -301,7 +301,7 @@ uses block collections and configured indentation by default, and prints
 timestamps and merge keys retain the reference tags. Quoted scalars resolve
 as strings unless explicitly tagged otherwise.
 
-`saphyr-parser` is vendored under `yaml/saphyr/` (MIT). The decoder needs
+`saphyr-parser` is vendored under `yaml/saphyr/` (MIT OR Apache-2.0). The decoder needs
 anchor names (`anchor_name`) and block/flow collection styles
 (`last_start_was_flow`), which its upstream API did not expose. Go-yaml's
 comment scanning and attachment logic was then ported into this scanner
@@ -381,3 +381,12 @@ Build that binary from the fetched checkout with:
 ```bash
 (cd ref/yq && go build -o ../yq-ref .)
 ```
+
+## License
+
+Original yq.rs contributions are available under the [MIT license](LICENSE).
+Vendored and ported portions retain their upstream MIT and Apache-2.0 terms;
+the combined packages declare `MIT AND Apache-2.0`. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for source attribution and
+complete license texts. Both registry packages include these notices and
+the supporting license files.
