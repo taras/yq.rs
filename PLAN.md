@@ -8,6 +8,11 @@ Measure of progress: passing scenarios in `cargo test --test conformance`
 out of 1,111 runnable (1,121 in the fixture, 10 skipped for XML/JSON-only
 decoders). Record the count at each milestone.
 
+Status on 2026-10-17: 1,107 of 1,111 pass. Every milestone below is done;
+the only open items are `shuffle` (4 scenarios, needs Go's `math/rand`
+sequence) and running `js/smoke.ts` under Bun and Node, which were not
+installed on the build machine.
+
 ## Milestones
 
 ### 0. Scaffold  — done

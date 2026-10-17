@@ -7,10 +7,13 @@ runtime can load with the plain `WebAssembly` API. It exists so that
 query and transform objects with yq syntax without shipping the Go yq's
 15 MB wasm build.
 
-**Status: scaffold.** The engine is not implemented yet. `PLAN.md` has the
-build order, `AGENTS.md` the working rules, `docs/design.md` the architecture.
-Progress is measured by the conformance suite: yq's own 1,100+ operator test
-scenarios, extracted verbatim into `tests/fixtures/scenarios.json`.
+**Status: 1,107 of 1,111 conformance scenarios pass** (the remaining four
+need `shuffle`, whose output depends on Go's random number generator).
+`PLAN.md` has the build order and findings, `AGENTS.md` the working rules,
+`docs/design.md` the architecture. Progress is measured by the conformance
+suite: yq's own 1,100+ operator test scenarios, extracted verbatim into
+`tests/fixtures/scenarios.json`. The release module is about 520 KB
+(210 KB gzipped).
 
 ## Scope
 
@@ -19,14 +22,17 @@ scenarios, extracted verbatim into `tests/fixtures/scenarios.json`.
   interpolation, variables, `ireduce`, `with`, entries, sort and group
   operators, path operators, `env`, string and regex functions, `@base64`,
   `to_json`/`from_json`, `to_yaml`/`from_yaml`, document index, and so on.
-- YAML and JSON input and output.
-- Tags, anchors and aliases, YAML styles. Comment preservation is planned
-  but deferred (see `PLAN.md`).
+- YAML and JSON input and output; `@csv`, `@tsv`, `@props`, `@base64`,
+  `@base64url`, `@uri` and `@sh` as string encoders and decoders.
+- Tags, anchors and aliases, YAML styles, and comment preservation (head,
+  line and foot comments survive decode, operators and encode).
+- `load`, `load_str`, `load_props` and `load_base64`, reading from a table
+  of files the host passes in.
 
-Out of scope: XML, TOML, CSV, properties, HCL, Lua, INI formats; `load`,
-`system`, file writes; anything that needs a filesystem, a clock or process
-environment inside the engine. The host supplies environment variables and
-the current time through options.
+Out of scope: XML, TOML, HCL, Lua and INI formats; `system`, `shuffle`, file
+writes; anything that needs a filesystem, a clock or process environment
+inside the engine. The host supplies environment variables, the current time
+and file contents through options.
 
 ## Layout
 
