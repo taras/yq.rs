@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -24,6 +24,27 @@ function run(command, args, input = "", cwd = fixture) {
   }
   assert.equal(result.signal, null, `${command} terminated with ${result.signal}`);
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+function runWithClosedStdout(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: fixture,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    });
+    let stderr = "";
+    child.once("error", reject);
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", chunk => {
+      stderr += chunk;
+    });
+    child.once("close", (status, signal) => {
+      resolve({ status: signal === "SIGPIPE" ? 141 : status, stderr });
+    });
+    child.stdout.destroy();
+  });
 }
 
 try {
@@ -64,6 +85,7 @@ try {
   for (const [path, content] of Object.entries(files)) {
     await writeFile(join(fixture, path), content);
   }
+  await writeFile(join(fixture, "large.yml"), `value: ${"x".repeat(512 * 1024)}\n`);
   const input = files["data dir/input.yml"];
   const cases = [
     ["stdin lookup", [".name"], input],
@@ -150,6 +172,12 @@ try {
   for (const runtime of runtimes) {
     const command = runtime === "node" ? process.execPath : runtime;
     const cli = (args, text = "", cwd = fixture) => run(command, [entry, ...args], text, cwd);
+    for (const args of [[".", "large.yml"], ["--help"]]) {
+      const expected = await runWithClosedStdout(reference, args);
+      assert.deepEqual(expected, { status: 141, stderr: "" }, "Go must exit silently on a broken pipe");
+      assert.deepEqual(await runWithClosedStdout(command, [entry, ...args]), expected, `${runtime}: broken pipe ${args.join(" ")}`);
+      checks += 1;
+    }
     for (const [name, args, text = ""] of cases) {
       assert.deepEqual(cli(args, text), run(reference, args, text), `${runtime}: ${name}`);
       checks += 1;

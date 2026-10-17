@@ -335,6 +335,7 @@ and pinned Go yq version. Unlike Go yq, explicit input format flags do not
 emit the timestamped compatibility warning about output defaults. Exit
 status is 1 for errors and, with `-e`, when
 all results are null/false or no results were produced.
+Broken pipe errors exit silently with status 141, matching Go yq.
 
 The CLI supplies `process.env` and the current clock value. It preloads
 string-literal paths used in `load`, `load_str`, `load_props` and

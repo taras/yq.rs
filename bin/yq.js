@@ -3,6 +3,14 @@ import { readFile, writeFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
 import { yq } from "./inline.js";
 
+process.stdout.on("error", error => {
+  if (error.code === "EPIPE") {
+    // Match Go's silent SIGPIPE exit when a downstream reader closes.
+    process.exit(141);
+  }
+  throw error;
+});
+
 const metadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const referenceVersion = "v4.54.1 (a814ff5)";
 const help = `yq ${metadata.version} — YAML and JSON queries (Go yq ${referenceVersion})
