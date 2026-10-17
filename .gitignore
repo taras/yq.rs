@@ -1,6 +1,8 @@
 /target
 /ref
 /node_modules
+/dist
+/*.tgz
 /js/*.wasm
 *.wasm.gz
 /.supervisor

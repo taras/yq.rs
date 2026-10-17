@@ -1,0 +1,54 @@
+{
+  "name": "yq.rs",
+  "version": "0.1.0",
+  "description": "YAML and JSON queries with yq-compatible semantics, powered by Rust and WebAssembly",
+  "type": "module",
+  "main": "./dist/inline.js",
+  "types": "./dist/inline.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/inline.d.ts",
+      "import": "./dist/inline.js"
+    },
+    "./inline": {
+      "types": "./dist/inline.d.ts",
+      "import": "./dist/inline.js"
+    },
+    "./loader": {
+      "types": "./dist/yq.d.ts",
+      "import": "./dist/yq.js"
+    },
+    "./yq.wasm": "./dist/yq.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "crates/yq-core/licenses/"
+  ],
+  "scripts": {
+    "build": "node js/build.mjs",
+    "typecheck": "tsc --project js/tsconfig.json --noEmit",
+    "test": "node js/package-test.mjs",
+    "smoke:node": "node js/package-test.mjs node",
+    "smoke:bun": "node js/package-test.mjs bun",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT AND Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taras/yq.rs.git"
+  },
+  "homepage": "https://github.com/taras/yq.rs#readme",
+  "bugs": "https://github.com/taras/yq.rs/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
