@@ -11,8 +11,10 @@
 #
 # One conversation is resumed across runs; its id is kept in .supervisor/
 # (gitignored) with one JSON result per run and supervise.log. Delete
-# .supervisor/session_id to start a fresh conversation. Ctrl-C stops cleanly
-# after the current run; whatever is on disk is committed and pushed.
+# .supervisor/session_id to start a fresh conversation. Ctrl-C (or closing the
+# terminal) kills the current run, commits and pushes whatever is on disk, and
+# exits. Only one supervisor may run per checkout; a second refuses to start,
+# and a run left behind by a crashed supervisor is killed before a new one begins.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -32,6 +34,30 @@ log() {
   printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG"
 }
 
+alive() {
+  kill -0 "$1" 2>/dev/null
+}
+
+kill_tree() {
+  pkill -TERM -P "$1" 2>/dev/null
+  kill -TERM "$1" 2>/dev/null
+  sleep 2
+  pkill -KILL -P "$1" 2>/dev/null
+  kill -KILL "$1" 2>/dev/null
+}
+
+if [ -s "$STATE/pid" ] && alive "$(cat "$STATE/pid")"; then
+  echo "a supervisor is already running (pid $(cat "$STATE/pid")); stop it first" >&2
+  exit 1
+fi
+printf '%s' "$$" >"$STATE/pid"
+if [ -s "$STATE/child_pid" ] && alive "$(cat "$STATE/child_pid")"; then
+  orphan=$(cat "$STATE/child_pid")
+  kill_tree "$orphan"
+  log "killed orphaned run (pid $orphan) left by a previous supervisor"
+fi
+child=""
+
 finish() {
   if [ -n "$(git status --porcelain)" ]; then
     log "committing uncommitted work on $BRANCH"
@@ -40,7 +66,12 @@ finish() {
   fi
   git push -q -u origin "$BRANCH" 2>>"$LOG" && log "pushed $BRANCH" || log "push failed; see $LOG"
 }
-trap 'log "interrupted"; finish; exit 130' INT TERM
+stop_child() {
+  if [ -n "$child" ] && alive "$child"; then
+    kill_tree "$child"
+  fi
+}
+trap 'log "interrupted"; stop_child; finish; rm -f "$STATE/pid" "$STATE/child_pid"; exit 130' INT TERM HUP
 
 git fetch -q origin
 if git show-ref -q "refs/remotes/origin/$BRANCH"; then
@@ -135,14 +166,23 @@ while :; do
   fi
 
   log "run $run starting (${remaining}s to deadline, model $model_name, baseline ${baseline:-0})"
+  # The run goes to the background and is waited on, because bash defers a
+  # trapped signal until a foreground command finishes, and timeout(1) puts
+  # its child in a separate process group that Ctrl-C never reaches. Both
+  # together made Ctrl-C a no-op that left the agent running on exit.
   if command -v timeout >/dev/null 2>&1; then
     CLAUDE_CODE_RETRY_WATCHDOG=1 timeout -s TERM "$remaining" \
-      claude -p "$prompt" --output-format json ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err"
+      claude -p "$prompt" --output-format json ${model_args[@]+"${model_args[@]}"} ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err" &
   else
     CLAUDE_CODE_RETRY_WATCHDOG=1 \
-      claude -p "$prompt" --output-format json ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err"
+      claude -p "$prompt" --output-format json ${model_args[@]+"${model_args[@]}"} ${perms[@]+"${perms[@]}"} ${resume[@]+"${resume[@]}"} >"$out" 2>"$err" &
   fi
+  child=$!
+  printf '%s' "$child" >"$STATE/child_pid"
+  wait "$child"
   code=$?
+  child=""
+  rm -f "$STATE/child_pid"
 
   if ! jq -e . "$out" >/dev/null 2>&1; then
     errors=$((errors + 1))
@@ -198,4 +238,5 @@ while :; do
 done
 
 finish
+rm -f "$STATE/pid" "$STATE/child_pid"
 log "supervisor exiting"
