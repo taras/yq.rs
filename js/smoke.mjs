@@ -26,6 +26,8 @@ const engines = [
   ["compiled module loader", await loader.createYq(await WebAssembly.compile(bytes))],
 ];
 const cases = [
+  [".name", "\uFEFFname: Ada\n", "Ada\n"],
+  [".name", 'name: "\uFEFFAda"\n', "\uFEFFAda\n"],
   [".a.b[0]", "a:\n  b: [1, 2]\n", "1\n"],
   [".a.b |= map(. * 2)", "a:\n  b: [1, 2] # c\n", "a:\n  b: [2, 4] # c\n"],
   ['.x as $v | {"v": $v}', "x: 1\n", "v: 1\n"],

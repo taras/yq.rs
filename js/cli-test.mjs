@@ -67,6 +67,8 @@ try {
   const files = {
     "data dir/input.yml": "name: Ada\ncount: 2\nitems:\n  - name: beta\n    score: 2\n  - name: alpha\n    score: 1\n",
     "data.json": '{"name":"Ada","count":2,"items":[2,1]}\n',
+    "bom.yml": "\uFEFFname: Ada\n",
+    "bom.json": '\uFEFF{"name":"Ada"}\n',
     "second.yml": "name: Grace\ncount: 3\n",
     "documents.yml": "name: Ada\n---\nname: Grace\n",
     "query.yq": ".name\n",
@@ -89,6 +91,20 @@ try {
   const input = files["data dir/input.yml"];
   const cases = [
     ["stdin lookup", [".name"], input],
+    ["YAML BOM stdin lookup", [".name"], files["bom.yml"]],
+    ["YAML BOM identity", ["."], files["bom.yml"]],
+    ["YAML BOM file lookup", [".name", "bom.yml"]],
+    ["YAML BOM with CRLF", [".name"], "\uFEFFname: Ada\r\n"],
+    ["YAML BOM document marker", ["."], "\uFEFF---\nname: Ada\n"],
+    ["YAML BOM leading comment", ["."], "\uFEFF# heading\nname: Ada\n"],
+    ["YAML BOM version directive", [".name"], "\uFEFF%YAML 1.1\n---\nname: Ada\n"],
+    ["YAML BOM after leading content", [".name"], "# heading\n\uFEFFname: Ada\n"],
+    ["YAML BOM flow mapping", [".name"], '\uFEFF{"name":"Ada"}\n'],
+    ["YAML BOM inside scalar", [".name"], 'name: "\uFEFFAda"\n'],
+    ["YAML BOM in later key", ['.["\uFEFFname"]'], "first: 1\n\uFEFFname: Ada\n"],
+    ["BOM from_yaml", ["-n", '"\uFEFFname: Ada\\n" | from_yaml | .name']],
+    ["BOM literal YAML load", ["-n", 'load("bom.yml").name']],
+    ["BOM string load preserves content", ["-n", 'load_str("bom.yml")']],
     ["identity default", [], input],
     ["eval alias", ["eval", ".count"], input],
     ["e alias and stdin dash", ["e", ".count", "-"], input],
@@ -183,13 +199,15 @@ try {
       checks += 1;
     }
     // Parser diagnostic wording differs from Go; retain exact streaming and failure behavior.
-    for (const [name, args] of [
+    for (const [name, args, text = ""] of [
       ["partial output before malformed YAML", [".", "second.yml", "bad.yml"]],
       ["JSON first mixed format detection", [".", "data.json", "second.yml"]],
       ["mixed formats with explicit YAML output", ["-o=yaml", ".", "data.json", "second.yml"]],
+      ["JSON BOM file is rejected", [".", "bom.json"]],
+      ["JSON BOM stdin is rejected", ["-p=json", "-o=json", ".name"], files["bom.json"]],
     ]) {
-      const expected = run(reference, args);
-      const actual = cli(args);
+      const expected = run(reference, args, text);
+      const actual = cli(args, text);
       assert.equal(expected.status, 1, `${runtime}: ${name} oracle must fail`);
       assert.equal(actual.status, expected.status, `${runtime}: ${name} exit status`);
       assert.equal(actual.stdout, expected.stdout, `${runtime}: ${name} partial output`);
