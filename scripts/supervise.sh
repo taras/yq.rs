@@ -53,7 +53,8 @@ ALLOWED=(
   "Bash(sed *)" "Bash(awk *)" "Bash(sort *)" "Bash(uniq *)" "Bash(diff *)" "Bash(cut *)"
   "Bash(tr *)" "Bash(echo *)" "Bash(printf *)" "Bash(mkdir *)" "Bash(cp *)" "Bash(mv *)"
   "Bash(rm *)" "Bash(gzip *)" "Bash(date *)" "Bash(timeout *)" "Bash(test *)" "Bash(which *)"
-  "Bash(command *)" "Bash(true)" "Bash(xxd *)" "Bash(stat *)" "Bash(touch *)"
+  "Bash(command *)" "Bash(true)" "Bash(xxd *)" "Bash(stat *)" "Bash(touch *)" "Bash(jq *)"
+  "Bash(env *)" "Bash(pwd)" "Bash(basename *)" "Bash(dirname *)" "Bash(xargs *)" "Bash(tee *)" "Bash(file *)"
 )
 DISALLOWED=(
   "Bash(git push --force*)" "Bash(git push -f*)" "Bash(git reset --hard*)" "Bash(git clean*)"
