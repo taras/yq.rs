@@ -30,13 +30,18 @@ pub const TEST_NOW: &str = "2021-05-19T01:02:03.000000004Z";
 /// Runs one scenario and returns the result strings in yq's test format
 /// (`D<doc>, P<path>, (<tag>)::<yaml>`), or the error message.
 pub fn run_scenario(scenario: &Scenario) -> Result<Vec<String>, String> {
+    let parsed = crate::parser::parse_expression(&scenario.expression).map_err(|e| e.0)?;
     let mut arena = Arena::new();
     let inputs = read_inputs(&mut arena, scenario).map_err(|e| e.0)?;
-    let results =
-        evaluate_expression(&mut arena, &scenario.expression, inputs, scenario).map_err(|e| e.0)?;
+    let mut evaluator = crate::eval::Evaluator::new(arena);
+    evaluator.env = scenario.environment_variables.clone();
+    evaluator.now = Some(TEST_NOW.to_string());
+    let results = evaluator
+        .get_matching_nodes_opt(crate::context::Context::new(inputs), parsed.as_ref())
+        .map_err(|e| e.0)?;
     let mut printed = Vec::new();
-    for id in results {
-        printed.push(result_to_string(&mut arena, id).map_err(|e| e.0)?);
+    for id in results.nodes().to_vec() {
+        printed.push(result_to_string(&mut evaluator.arena, id).map_err(|e| e.0)?);
     }
     Ok(printed)
 }
@@ -51,20 +56,6 @@ fn read_inputs(arena: &mut Arena, scenario: &Scenario) -> Result<Vec<NodeId>, Er
         inputs.extend(more);
     }
     Ok(inputs)
-}
-
-fn evaluate_expression(
-    _arena: &mut Arena,
-    expression: &str,
-    inputs: Vec<NodeId>,
-    _scenario: &Scenario,
-) -> Result<Vec<NodeId>, Error> {
-    if expression.trim() == "." {
-        return Ok(inputs);
-    }
-    Err(Error(format!(
-        "expression parser not implemented yet: {expression}"
-    )))
 }
 
 /// `resultToString`.

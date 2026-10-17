@@ -53,6 +53,27 @@ pub fn parse_int(number_string: &str) -> Result<i64, Error> {
     Ok(parse_int64(number_string)?.1)
 }
 
+/// Prints an integer with the Go format verb `parse_int64` returned.
+pub fn format_int(format: &str, value: i64) -> String {
+    match format {
+        "0x%X" => {
+            if value < 0 {
+                format!("-0x{:X}", value.unsigned_abs())
+            } else {
+                format!("0x{value:X}")
+            }
+        }
+        "0o%o" => {
+            if value < 0 {
+                format!("-0o{:o}", value.unsigned_abs())
+            } else {
+                format!("0o{value:o}")
+            }
+        }
+        _ => value.to_string(),
+    }
+}
+
 /// Go's `strconv.ParseFloat` for the inputs yq feeds it.
 pub fn parse_float(text: &str) -> Result<f64, Error> {
     let cleaned = text.replace('_', "");

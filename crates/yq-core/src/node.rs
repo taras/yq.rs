@@ -114,7 +114,7 @@ pub fn format_path(path: &[PathElem]) -> String {
     format!("[{}]", parts.join(" "))
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AssignPrefs {
     pub dont_overwrite_anchor: bool,
     pub only_write_null: bool,

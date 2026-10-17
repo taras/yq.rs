@@ -8,8 +8,15 @@
 extern crate alloc;
 
 pub mod conformance;
+pub mod context;
+pub mod eval;
 pub mod json;
+pub mod lexer;
 pub mod node;
+pub mod operation;
+pub mod ops;
+pub mod parser;
+pub mod postfix;
 pub mod printer;
 pub mod util;
 pub mod yaml;
@@ -72,15 +79,19 @@ pub fn evaluate(expression: &str, input: &str, options: &EvalOptions) -> Result<
             Format::Json => json::decode::decode_documents(&mut arena, input)?,
         }
     };
-    let _ = expression;
+    let parsed = parser::parse_expression(expression)?;
+    let mut evaluator = eval::Evaluator::new(arena);
+    evaluator.env = options.env.clone();
+    evaluator.now = options.now.clone();
+    let results =
+        evaluator.get_matching_nodes_opt(context::Context::new(inputs), parsed.as_ref())?;
     let mut printer = printer::Printer::new(printer::PrinterPrefs {
         format: options.output_format,
         indent: options.indent,
         unwrap_scalar: true,
         print_doc_separators: true,
     });
-    for id in inputs {
-        printer.print_node(&mut arena, id)?;
-    }
+    let nodes = results.nodes().to_vec();
+    printer.print_results(&mut evaluator.arena, &nodes)?;
     Ok(printer.into_output())
 }
