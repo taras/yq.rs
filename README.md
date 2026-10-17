@@ -73,6 +73,20 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 
 ## Quick start
 
+Run a query with Node 22 or newer and npm:
+
+```bash
+printf 'name: Ada\n' | npx --yes yq.rs '.name'
+# Ada
+```
+
+The npm package is `yq.rs`; it installs an executable named `yq`. The package
+includes its WebAssembly engine, so CLI use needs no Rust or Go toolchain.
+See [Command line](#command-line) for project and global installation,
+file editing and npm scripts.
+
+## Build from source
+
 For development, install Rust through rustup, Node 22 or newer, and Bun.
 The toolchain file pins Rust and installs the wasm target automatically.
 From a checkout, run:
@@ -98,7 +112,7 @@ then exercises its inline and raw entries and installed `yq` executable
 under both Node and Bun. Use
 `npm run smoke:node` or `npm run smoke:bun` to test a single runtime.
 
-For local CLI use:
+To run the Rust comparison CLI from the checkout:
 
 ```bash
 printf 'a: [1, 2]\n' | cargo run -q -p yq-cli -- '.a | map(. * 2)'
@@ -232,17 +246,77 @@ API exposes the same settings through `EvalOptions` using snake_case names.
 
 ## Command line
 
-Install locally for npm/Bun scripts, or globally:
+### Run with npx
+
+Run directly from the `yq.rs` package without adding a project dependency:
+
+```bash
+npx --yes yq.rs '.name' config.yml
+printf 'items: [1, 2]\n' | npx --yes yq.rs -o json '.items'
+npx --yes yq.rs --help
+```
+
+You can also select the package and executable explicitly:
+
+```bash
+npx --yes --package=yq.rs yq '.name' config.yml
+```
+
+[npx](https://docs.npmjs.com/cli/v11/commands/npx/) fetches the package when
+needed; `--yes` accepts its installation prompt. Use `yq.rs` as the package
+name for these one-off runs. After a local install, `npx yq` uses the project's
+`yq` executable.
+
+### Install in a project
+
+Add the CLI as a development dependency:
 
 ```bash
 npm install --save-dev yq.rs
+# or: bun add --dev yq.rs
 npx yq '.name' config.yml
-npx yq -i '.version = "2.0"' package.json
-printf 'items: [1, 2]\n' | npx yq -o json '.items'
-# package.json scripts resolve the local yq executable automatically:
-# "query": "yq '.name' config.yml"
-# or: npm install --global yq.rs
 ```
+
+npm scripts resolve the installed `yq` executable automatically. Add a script
+to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "query": "yq '.name' config.yml"
+  }
+}
+```
+
+Then run `npm run query` (or `bun run query`). Commit `package.json` and the
+lockfile so teammates and CI install the same version with `npm ci`.
+
+### Install globally
+
+Install once to invoke `yq` directly from your shell:
+
+```bash
+npm install --global yq.rs
+yq --version
+yq '.name' config.yml
+```
+
+### Query and edit files
+
+These examples use a project-local installation:
+
+```bash
+npx yq eval '.items[] | select(.enabled)' config.yml
+npx yq -i '.version = "2.0"' package.json
+npx yq -o json '.' config.yml
+npx yq --from-file query.yq config.yml
+npx yq -e '.enabled == true' config.yml
+```
+
+The last command exits with status 1 when `.enabled` is not true, making it
+useful in CI checks. Use `--help` to see available flags.
+
+### Supported behavior
 
 `yq [eval|e] <expression> [files...]` evaluates files independently, reading
 stdin when no file is supplied or a filename is `-`. `--expression` forces
