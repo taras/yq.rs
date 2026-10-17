@@ -66,7 +66,9 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 |---|---|
 | `crates/yq-core` | The engine. Pure Rust, no I/O, no platform dependencies. |
 | `crates/yq-wasm` | `cdylib` with a hand-written ABI for evaluation, match status and memory management. No wasm-bindgen. |
-| `crates/yq-cli` | `yq-rs`, a thin CLI for diffing against the reference yq locally. |
+| `crates/yq-cli` | Native `yq` command with the same flags and output as the wasm CLI. |
+| `crates/yq-node` | Optional Node-API addon for library callers. |
+| `npm/` | Platform package manifests and dependency license sources. |
 | `js/` | Wasm loader, inline package build, declarations and installed-package tests. |
 | `bin/yq.js` | Node/Bun CLI source, packaged as `dist/cli.mjs`. |
 | `crates/yq-core/tests/fixtures` | The conformance fixture and its format description, included in the published crate. |
@@ -81,7 +83,9 @@ printf 'name: Ada\n' | npx --yes yq.rs '.name'
 ```
 
 The npm package is `yq.rs`; it installs an executable named `yq`. The package
-includes its WebAssembly engine, so CLI use needs no Rust or Go toolchain.
+selects a native binary when a matching optional package is installed, and
+otherwise uses its included WebAssembly engine. CLI use needs no Rust or Go
+toolchain.
 See [Command line](#command-line) for project and global installation,
 file editing and npm scripts.
 
@@ -95,7 +99,8 @@ From a checkout, run:
 cargo test
 cargo build --release --target wasm32-unknown-unknown -p yq-wasm
 cp target/wasm32-unknown-unknown/release/yq_wasm.wasm js/yq.wasm
-npm ci
+npm ci --omit=optional
+cargo build --release -p yq-cli
 npm run build
 npm test
 ```
@@ -112,7 +117,7 @@ then exercises its inline and raw entries and installed `yq` executable
 under both Node and Bun. Use
 `npm run smoke:node` or `npm run smoke:bun` to test a single runtime.
 
-To run the Rust comparison CLI from the checkout:
+To run the native CLI from the checkout:
 
 ```bash
 printf 'a: [1, 2]\n' | cargo run -q -p yq-cli -- '.a | map(. * 2)'
@@ -180,6 +185,20 @@ TypeScript runtime support. It exports a ready `yq` instance and an async
 `createYq()` factory for independent instances. `yq.rs/inline`
 provides the same entry. The package also installs the `yq` executable
 for Node and Bun.
+
+For repeated evaluation within Node, opt into the native addon:
+
+```ts
+import { yq, backend } from "yq.rs/native";
+yq.evaluate(".name", "name: Ada\n"); // "Ada\n"
+console.log(backend); // "native" when the optional addon loads, otherwise "wasm"
+```
+
+This entry has the same `Yq` interface, options, `YqError` class and partial
+error output as the wasm entries. It silently uses the inline wasm backend
+when the platform addon is missing or cannot load. Bun always uses wasm.
+`YQ_FORCE_WASM=1` also selects wasm for this entry and the CLI. The default,
+`inline` and `loader` imports continue to use wasm.
 
 For bundlers or hosts that load wasm themselves, use the raw asset and
 explicit loader:
@@ -344,9 +363,23 @@ continues to receive these capabilities only through explicit options.
 
 `eval-all`/`ea`, split-file output, front matter, header preprocessing,
 `--yaml-fix-merge-anchor-to-spec`, and other document formats are unsupported.
-Input `filename` remains empty; `fileIndex` tracks the input position. The Rust
-`yq-rs` executable is a local comparison tool; the npm `yq` executable is the
-supported automation interface.
+Input `filename` remains empty; `fileIndex` tracks the input position.
+
+The npm launcher resolves one platform package and runs its native binary
+with inherited stdio. It loads wasm when the native package is absent or
+the binary cannot be started. An executed binary's exit status or signal is
+propagated without retrying the evaluation.
+Supported prebuilds are macOS arm64/x64, Linux x64/arm64 with glibc 2.28 or
+newer, Linux x64/arm64 with musl, and Windows x64. Each has a CLI package
+`yq.rs-<platform>` and a separate library addon `yq.rs-<platform>-napi`.
+Optional dependencies are pinned to the exact meta-package version; installs
+using `--omit=optional` use wasm. There are no install-time downloads or
+build scripts.
+
+The npm launcher still starts Node before spawning native `yq`. To avoid
+that startup cost, use the matching `yq-<platform>` binary from the GitHub
+release directly (`chmod +x` on macOS/Linux), or build `cargo build --release
+-p yq-cli` and run `target/release/yq`. Both expose the same CLI flags.
 
 Run installed-package CLI comparisons against the pinned Go oracle with:
 
@@ -354,11 +387,12 @@ Run installed-package CLI comparisons against the pinned Go oracle with:
 (cd ref/yq && go build -o ../yq-ref .)
 npm run test:cli
 # An external oracle path can be supplied with YQ_REFERENCE=/path/to/yq.
-# Add -- node or -- bun to test a single runtime.
+# Add -- node, -- bun or -- native to test a single runtime.
+# Set YQ_NATIVE=/path/to/yq to use a different native build.
 ```
 
 This command requires the oracle and compares stdout, stderr, exit status,
-and in-place output. Decoder error wording can differ from Go outside the
+and in-place output across the wasm Node/Bun CLIs and native binary. Decoder error wording can differ from Go outside the
 conformance fixture; the tests check retained output and failure status
 separately for those cases. The regular `npm test` also tests the installed
 CLI on both runtimes without requiring Go. CI also builds the pinned Go
@@ -366,50 +400,88 @@ oracle with Go 1.26.0 and runs the full comparison command.
 
 ## Performance
 
-Measured on 2026-10-17 on macOS arm64, using engine commit `d75ebac`
-against Go yq v4.54.1 (`a814ff5`). Rust used this project's size-optimized
-release profile (`opt-level=z`, LTO, one codegen unit); Go used its default
-optimized build. Toolchains: Rust 1.99.1, Go 1.26.0 and Deno 2.9.7.
-All 19 benchmark cases produced byte-identical output across Go, native
-Rust and Rust wasm before timing.
+Measured on 2026-10-17 on an Apple M1 Max, macOS 27.0 arm64, with Node
+22.23.3, Bun 1.3.14, Rust 1.99.1 and Go 1.26.0. Go yq is v4.54.1
+(`a814ff5`); the Rust engine is unchanged from `98f8eb9`. Rust uses the
+size-optimized release profile (`opt-level=z`, LTO, one codegen unit).
+Outputs were checked byte for byte before timing. These are synthetic
+workloads on one machine.
 
-Median milliseconds per evaluation, from five warmed batches:
+CLI medians in milliseconds, including process startup, file reading,
+evaluation and printing. The startup column runs `--version`; the other
+columns run `.name` on 1,024-byte and 10,000,000-byte YAML files:
 
-| Workload | Records | Go native | Rust native | Rust wasm (Deno) |
-|---|---:|---:|---:|---:|
-| YAML round trip | 5,000 | 42.6 | 59.1 | 59.2 |
-| YAML filtering | 5,000 | 32.5 | 47.6 | 47.3 |
-| JSON filtering | 5,000 | 23.9 | 20.9 | 22.4 |
-| YAML sorting | 5,000 | 35.9 | 60.4 | 59.0 |
-| JSON sorting | 5,000 | 28.0 | 31.7 | 34.5 |
-| YAML bulk update | 500 | 439.1 | 434.2 | 485.3 |
+| CLI | Startup ms | 1 KB ms | 10 MB ms | 1 KB peak RSS MiB | 10 MB peak RSS MiB |
+|---|---:|---:|---:|---:|---:|
+| Go | 8.7 | 8.7 | 135.2 | 14.3 | 44.9 |
+| Rust native | 3.9 | 4.1 | 283.6 | 2.5 | 50.5 |
+| npm native (Node) | 38.1 | 38.1 | 319.6 | 41.5 | 50.5 |
+| wasm (Node) | 40.5 | 46.0 | 556.5 | 51.5 | 179.6 |
+| wasm (Bun) | 29.3 | 34.5 | 335.4 | 51.7 | 184.8 |
 
-Each evaluation parses the expression and input, evaluates, and serializes
-the result. Timings exclude process startup, file reading and wasm
-compilation/instantiation; wasm includes the TypeScript loader's string
-copies. Each sample warms for at least 200 ms, then times a batch targeting
-100 ms. Runs are serial, with randomized implementation order and normal
-Go garbage collection.
+Timings use 11 serial runs after two warmups, with shuffled implementation
+order and warm filesystem caches. RSS is the median of three separate
+`/usr/bin/time -l` runs. For the npm native launcher, that is the largest
+individual process RSS, not the combined Node-plus-child memory footprint.
+The inputs contain `name: Ada` and a sequence of mappings with roughly
+1 KB string values; padding comments make their byte sizes exact.
 
-Inputs contain `items` with `id`, `name`, `active` and `score` fields:
-names are `user-00000` onward, every third record is active, and
-`score = (id * 37) % 10000`. YAML uses block collections (~337 KB for
-5,000 records); JSON is compact (~297 KB). Filtering uses
-`.items | map(select(.active == true)) | length`; sorting uses
-`.items | sort_by(.score) | .[0:10]`; updates use
-`.items |= map(.score += 1)`.
+The standalone native binary starts fastest. The npm launcher still pays
+Node startup: its 1 KB lookup is about 17% faster than wasm in Node, while
+its 10 MB lookup is about 43% faster. Go remains faster for the large YAML
+input. Bun's wasm path is substantially faster than Node's on this input.
 
-For CLI use, startup dominates small inputs: a 50-byte YAML lookup took
-**9.6 ms in Go versus 4.8 ms in Rust**, including startup, file reading and
-output to `/dev/null` (median of 11 runs after two warmups).
+For library use, the following medians time 10,000 evaluations in one Node
+22 process, across five batches after 500 warmup calls per backend. These
+include expression parsing, input decoding, evaluation, serialization and
+JavaScript/Rust transfers, but exclude importing, wasm compilation and
+process startup:
 
-Go is faster on these large YAML evaluations, while Rust leads on JSON
-filtering. Rust wasm stays close to native Rust on the large read-only
-cases. Replacing insertion sort with stable merge sort reduced native Rust's
-5,000-record sorts from roughly 1.9 seconds at `275d3fa` to 60 ms for YAML
-and 32 ms for JSON. Bulk updates remain expensive in both engines: going
-from 100 to 500 records takes about 24 times as long. These measurements
-describe the current builds and these synthetic workloads.
+| Workload | wasm Node ms / 10k | Native addon ms / 10k | wasm / native |
+|---|---:|---:|---:|
+| YAML lookup | 520.9 | 550.6 | 0.95× |
+| YAML filtering (16 records) | 2599.3 | 2203.4 | 1.18× |
+| JSON sorting (16 records) | 1937.2 | 1638.1 | 1.18× |
+| YAML update (16 records) | 9843.5 | 7512.4 | 1.31× |
+
+The addon helps these filtering, sorting and update workloads; the tiny
+lookup is slightly faster through wasm. It is an opt-in entry because its
+benefit depends on the workload. The 16-record inputs have `id`, `name`,
+`active` and `score` fields; every third record is active and
+`score = (id * 37) % 100`. The benchmark source contains the exact queries.
+
+Library memory was measured separately in fresh processes, using the same
+machine and runtime versions. Values below are whole-process RSS in MiB,
+including the runtime and inputs, and are medians of three runs:
+
+| Library backend | Loaded, idle | Peak: repeated small queries | Peak: 10 MB YAML |
+|---|---:|---:|---:|
+| Native addon, Node 22 | 44.9 | 53.3 | 114.4 |
+| Wasm, Node 22 | 48.5 | 65.2 | 118.5 |
+| Wasm, Bun | 45.9 | 129.8 | 127.4 |
+
+The repeated workload evaluates each of the four library queries above
+10,000 times. The large workload evaluates `.name` once against the 10 MB
+CLI input in a separate process. Idle RSS is sampled after loading and
+explicit garbage collection; workload peaks come from `/usr/bin/time -l`.
+The measurement harness alone uses about 43.7 MiB in Node and 32.0 MiB in
+Bun. The addon reduces peak RSS by about 18% for the repeated workload;
+its large-input peak is close to wasm in Node.
+
+Reproduce from a built checkout with matching native packages installed in
+`target/bench/install` (use the local tarballs from `.github/release/native.py`):
+
+```bash
+python3 .github/bench/cli.py --go /path/to/go-yq --node /path/to/node22 \
+  --entry target/bench/install/node_modules/yq.rs/dist/cli.mjs
+/path/to/node22 .github/bench/library.mjs
+python3 .github/bench/memory.py --node /path/to/node22
+```
+
+Benchmark sources: [CLI](.github/bench/cli.py),
+[library timing](.github/bench/library.mjs) and
+[library memory](.github/bench/memory.py). Raw samples are written to the
+ignored `target/bench` directory and are not checked into the repository.
 
 ## Architecture
 
@@ -602,7 +674,8 @@ binaryen_bin="$(python3 .github/release/install_binaryen.py)"
 "$binaryen_bin/wasm-opt" -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
   target/wasm32-unknown-unknown/release/yq_wasm.wasm -o js/yq.wasm
 python3 .github/release/verify.py size
-npm ci
+npm ci --omit=optional
+cargo build --release -p yq-cli
 npm run build
 npm test
 ```
@@ -612,21 +685,65 @@ float-conversion instructions emitted by the pinned Rust compiler. CI
 fails above 2,000,000 raw bytes or 700,000 gzip bytes. The gzip measurement
 uses compression level 9 and a zero timestamp for reproducibility.
 
+Prepare a version change with `python3 .github/release/version.py X.Y.Z`.
+It updates the workspace, platform manifests, exact optional dependencies
+and lockfiles together; review and commit the result before tagging.
 Workspace Cargo, npm and lockfile versions must agree. A pushed `vX.Y.Z`
 tag must match that version and runs verification before publishing
-`yq-core` to crates.io and `yq.rs` to npm. The publish job compares
+`yq-core` to crates.io and 15 npm packages: `yq.rs`, seven CLI packages, and
+seven Node-API addon packages. The publish job compares
 the Cargo archive with the verified artifact, publishes the verified npm
-tarball with provenance, attests the release artifacts, and attaches wasm
-to the GitHub release. Release notes include the fixture's pinned yq commit,
+tarballs with provenance, attests the release artifacts, and attaches wasm,
+native binaries, addons and package archives with SHA256SUMS to the GitHub
+release. The seven-platform matrix uses pinned cargo-zigbuild and Zig for
+Linux and native macOS/Windows runners. Node 22 tests the installed native
+and fallback entries on each platform, including an Alpine container for musl.
+Platform packages publish first; the job waits until their registry metadata
+is available and their integrity matches before publishing the meta package.
+It also waits for the meta package before creating the GitHub release. Release notes include the fixture's pinned yq commit,
 the conformance count and module size. A retried release skips a registry
 only when its already-published bytes match the verified artifact.
 
-First publication requires repository secrets `CARGO_REGISTRY_TOKEN` and
-`NPM_TOKEN` with permission to create their respective packages. After the
-packages exist, configure each registry's trusted publisher for owner
-`taras`, repository `yq.rs`, workflow `release.yml` and environment `release`;
-npm must allow direct publishing. Subsequent releases can use OIDC without
-long-lived registry tokens. See the official
+Before the first `0.1.3` tag, bootstrap the 14 new platform package names.
+npm trusted publishers can be configured only after the packages exist.
+Use the verified `0.1.2` platform tarballs from the merged commit's CI run:
+
+1. Download that run's `release-inputs-<commit>` artifact into
+   `target/release-artifacts`. Check its `SHA256SUMS` before publishing.
+2. Sign in interactively with `npm login` and publish each of the 14 platform
+   archives, completing npm's authentication or staged-publish prompts:
+
+   ```bash
+   for archive in target/release-artifacts/yq.rs-*-0.1.2.tgz; do
+     npm publish "$archive" --access public --ignore-scripts
+   done
+   ```
+
+   Publish only the platform archives. The `yq.rs` meta package and
+   `yq-core` version `0.1.2` already exist and must not be republished.
+3. Wait for every platform version to become available. First publications
+   can spend an additional half hour or more in npm processing; budget an
+   afternoon for bootstrap and publisher configuration.
+4. For each new package, configure GitHub owner `taras`, repository `yq.rs`,
+   workflow `release.yml`, environment `release`, and enable **Direct npm
+   publish**. The existing meta package needs its own trusted publisher too.
+5. Prepare and merge the `0.1.3` version change, then push its tag. All 15 npm
+   packages can now publish from CI using OIDC and provenance without a
+   long-lived npm token.
+
+The manual bootstrap versions do not receive npm's CI provenance; the
+subsequent `0.1.3` workflow publishes the release versions with provenance.
+Alternatively, a bootstrap `NPM_TOKEN` secret with permission to create all
+new names can handle their first publication in CI; publisher setup remains
+per package and is needed before removing that credential. Creating the
+`yq-core` package initially requires a crates.io publishing credential;
+existing packages can use their configured trusted publisher.
+
+The workflow waits up to one hour per publication phase for versions to
+become available. It verifies already-published bytes before skipping them
+on retry. If bootstrapping from a failed tag run instead, manually publish
+its exact verified archives and rerun only the failed publish job; rebuilding
+archives can change their bytes and defeat the integrity check. See the
 [crates.io setup](https://crates.io/docs/trusted-publishing) and
 [npm setup](https://docs.npmjs.com/trusted-publishers/).
 
@@ -636,5 +753,6 @@ Original yq.rs contributions are available under the [MIT license](LICENSE).
 Vendored and ported portions retain their upstream MIT and Apache-2.0 terms;
 the combined packages declare `MIT AND Apache-2.0`. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for source attribution and
-complete license texts. Both registry packages include these notices and
-the supporting license files.
+complete license texts. All packages include these notices and supporting license files. Native
+platform packages additionally include Cargo dependency licenses and a
+generated dependency index.

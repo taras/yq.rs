@@ -1,0 +1,30 @@
+{
+  "name": "yq.rs-darwin-x64",
+  "version": "0.1.2",
+  "description": "Native darwin-x64 binary for yq.rs",
+  "license": "MIT AND Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taras/yq.rs.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "yq",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "crates/yq-core/licenses/",
+    "licenses/"
+  ],
+  "exports": {
+    "./yq": "./yq",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

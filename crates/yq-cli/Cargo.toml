@@ -1,6 +1,6 @@
 [package]
 name = "yq-cli"
-description = "Thin command line over yq-core, for local testing against the reference yq"
+description = "Native yq-compatible YAML and JSON command line"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,9 @@ repository.workspace = true
 publish = false
 
 [[bin]]
-name = "yq-rs"
+name = "yq"
 path = "src/main.rs"
 
 [dependencies]
 yq-core = { path = "../yq-core" }
+serde_json = "1"
