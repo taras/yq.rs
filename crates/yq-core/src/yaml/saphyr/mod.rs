@@ -17,5 +17,5 @@ mod parser;
 mod scanner;
 
 pub use input::{str::StrInput, Input};
-pub use parser::{Event, EventReceiver, Parser, SpannedEventReceiver, Tag};
-pub use scanner::{Marker, ScalarStyle, ScanError, Span};
+pub use parser::{Event, EventComments, EventReceiver, Parser, SpannedEventReceiver, Tag};
+pub use scanner::{Comment, Marker, ScalarStyle, ScanError, Span};

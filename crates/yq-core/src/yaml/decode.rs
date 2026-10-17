@@ -9,7 +9,7 @@ use crate::node::{
     SINGLE_QUOTED_STYLE, TAGGED_STYLE,
 };
 use crate::yaml::resolve::resolve_tag;
-use crate::yaml::saphyr::{Event, Parser, ScalarStyle, Span, StrInput, Tag};
+use crate::yaml::saphyr::{Event, EventComments, Parser, ScalarStyle, Span, StrInput, Tag};
 use crate::Error;
 
 pub const DOC_SEPARATOR_MARKER: &str = "$yqDocSeparator$";
@@ -149,7 +149,7 @@ struct Decoder<'a, 'input> {
     arena: &'a mut Arena,
     parser: Parser<'input, StrInput<'input>>,
     anchors: HashMap<String, NodeId>,
-    pending: Option<(Event<'input>, Span)>,
+    pending: Option<(Event<'input>, Span, EventComments)>,
 }
 
 impl<'a, 'input> Decoder<'a, 'input> {
@@ -162,27 +162,42 @@ impl<'a, 'input> Decoder<'a, 'input> {
         }
     }
 
-    fn next(&mut self) -> Result<(Event<'input>, Span), Error> {
+    fn next(&mut self) -> Result<(Event<'input>, Span, EventComments), Error> {
         if let Some(event) = self.pending.take() {
             return Ok(event);
         }
         match self.parser.next_event() {
-            Some(Ok(event)) => Ok(event),
+            Some(Ok((event, span))) => Ok((event, span, self.parser.event_comments().clone())),
             Some(Err(error)) => Err(Error(format!("yaml: {error}"))),
-            None => Ok((Event::StreamEnd, Span::default())),
+            None => Ok((Event::StreamEnd, Span::default(), EventComments::default())),
         }
     }
 
     fn decode_all(&mut self) -> Result<Vec<NodeId>, Error> {
         let mut roots = Vec::new();
         loop {
-            let (event, _) = self.next()?;
+            let (event, _, comments) = self.next()?;
             match event {
                 Event::StreamStart | Event::DocumentEnd => {}
                 Event::StreamEnd => return Ok(roots),
                 Event::DocumentStart(_) => {
-                    let (first, span) = self.next()?;
-                    let root = self.compose(first, span, None)?;
+                    let (first, span, first_comments) = self.next()?;
+                    let root = self.compose(first, span, first_comments, None)?;
+                    // The document node's comments wrap the root's, as yq's
+                    // decoder concatenates them.
+                    let mut foot = String::new();
+                    let (next_event, next_span, next_comments) = self.next()?;
+                    if matches!(next_event, Event::DocumentEnd) {
+                        foot = next_comments.foot.clone();
+                    }
+                    self.pending = Some((next_event, next_span, next_comments));
+                    let node = self.arena.get_mut(root);
+                    if !comments.head.is_empty() {
+                        node.head_comment = format!("{}{}", comments.head, node.head_comment);
+                    }
+                    if !foot.is_empty() {
+                        node.foot_comment = format!("{}{}", foot, node.foot_comment);
+                    }
                     roots.push(root);
                 }
                 other => {
@@ -196,12 +211,16 @@ impl<'a, 'input> Decoder<'a, 'input> {
         &mut self,
         event: Event<'input>,
         span: Span,
+        comments: EventComments,
         parent: Option<NodeId>,
     ) -> Result<NodeId, Error> {
         let id = self.arena.push(Node {
             parent,
             line: span.start.line(),
             column: span.start.col() + 1,
+            head_comment: comments.head,
+            line_comment: comments.line,
+            foot_comment: comments.foot,
             ..Node::default()
         });
         match event {
@@ -256,8 +275,11 @@ impl<'a, 'input> Decoder<'a, 'input> {
                 }
                 let mut index = 0;
                 loop {
-                    let (child_event, child_span) = self.next()?;
+                    let (child_event, child_span, child_comments) = self.next()?;
                     if matches!(child_event, Event::SequenceEnd) {
+                        let node = self.arena.get_mut(id);
+                        node.line_comment = child_comments.line;
+                        node.foot_comment = child_comments.foot;
                         break;
                     }
                     let key = self.arena.push(Node {
@@ -268,7 +290,7 @@ impl<'a, 'input> Decoder<'a, 'input> {
                         is_map_key: true,
                         ..Node::default()
                     });
-                    let child = self.compose(child_event, child_span, Some(id))?;
+                    let child = self.compose(child_event, child_span, child_comments, Some(id))?;
                     self.arena.get_mut(child).key = Some(key);
                     self.arena.get_mut(id).content.push(child);
                     index += 1;
@@ -286,16 +308,41 @@ impl<'a, 'input> Decoder<'a, 'input> {
                     node.style = style_bits;
                     node.tag = tag_text.unwrap_or_else(|| "!!map".to_string());
                 }
+                let block = style_bits & FLOW_STYLE == 0;
                 loop {
-                    let (key_event, key_span) = self.next()?;
+                    let (key_event, key_span, key_comments) = self.next()?;
                     if matches!(key_event, Event::MappingEnd) {
+                        let content = self.arena.get(id).content.clone();
+                        let node = self.arena.get_mut(id);
+                        node.line_comment = key_comments.line;
+                        node.foot_comment = key_comments.foot;
+                        // A block mapping's foot comment belongs to its last
+                        // value, as in go-yaml's composer.
+                        if block && !node.foot_comment.is_empty() && content.len() > 1 {
+                            let foot = std::mem::take(&mut node.foot_comment);
+                            self.arena.get_mut(content[content.len() - 1]).foot_comment = foot;
+                        }
                         break;
                     }
-                    let key = self.compose(key_event, key_span, Some(id))?;
+                    let key = self.compose(key_event, key_span, key_comments, Some(id))?;
                     self.arena.get_mut(key).is_map_key = true;
-                    let (value_event, value_span) = self.next()?;
-                    let value = self.compose(value_event, value_span, Some(id))?;
+                    if block && !self.arena.get(key).foot_comment.is_empty() {
+                        // A foot comment on a key is a foot of the prior value.
+                        let content = self.arena.get(id).content.clone();
+                        if content.len() > 2 {
+                            let foot = std::mem::take(&mut self.arena.get_mut(key).foot_comment);
+                            self.arena.get_mut(content[content.len() - 1]).foot_comment = foot;
+                        }
+                    }
+                    let (value_event, value_span, value_comments) = self.next()?;
+                    let value = self.compose(value_event, value_span, value_comments, Some(id))?;
                     self.arena.get_mut(value).key = Some(key);
+                    if self.arena.get(key).foot_comment.is_empty()
+                        && !self.arena.get(value).foot_comment.is_empty()
+                    {
+                        let foot = std::mem::take(&mut self.arena.get_mut(value).foot_comment);
+                        self.arena.get_mut(key).foot_comment = foot;
+                    }
                     let node = self.arena.get_mut(id);
                     node.content.push(key);
                     node.content.push(value);

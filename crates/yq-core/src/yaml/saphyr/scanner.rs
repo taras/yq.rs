@@ -19,7 +19,7 @@ use core::char;
 
 use crate::yaml::saphyr::{
     char_traits::{
-        as_hex, is_anchor_char, is_blank_or_breakz, is_break, is_breakz, is_flow, is_hex,
+        as_hex, is_anchor_char, is_blank, is_blank_or_breakz, is_break, is_breakz, is_flow, is_hex,
         is_tag_char, is_uri_char,
     },
     input::{Input, SkipTabs},
@@ -135,6 +135,23 @@ impl Span {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+/// A comment found while scanning, ported from go-yaml. The parser folds
+/// these into the events whose tokens follow `token_mark`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Comment {
+    /// Where the whitespace/comment scan that found it started.
+    pub scan_mark: Marker,
+    /// Tokens starting at or after this position receive the comment.
+    pub token_mark: Marker,
+    /// Position of the `#`.
+    pub start_mark: Marker,
+    /// Position where the comment ended.
+    pub end_mark: Marker,
+    pub head: String,
+    pub line: String,
+    pub foot: String,
 }
 
 /// An error that occurred while scanning.
@@ -489,6 +506,11 @@ pub struct Scanner<'input, T> {
     buf_leading_break: String,
     buf_trailing_breaks: String,
     buf_whitespaces: String,
+    /// Line breaks consumed since the last non-blank character (go-yaml's
+    /// `newlines`), used to place comments.
+    newlines: usize,
+    /// Comments found so far, consumed by the parser in order.
+    pub(crate) comments: Vec<Comment>,
 }
 
 impl<T: Input + Clone> Clone for Scanner<'_, T> {
@@ -515,6 +537,8 @@ impl<T: Input + Clone> Clone for Scanner<'_, T> {
             buf_leading_break: self.buf_leading_break.clone(),
             buf_trailing_breaks: self.buf_trailing_breaks.clone(),
             buf_whitespaces: self.buf_whitespaces.clone(),
+            newlines: self.newlines,
+            comments: self.comments.clone(),
         }
     }
 }
@@ -574,6 +598,8 @@ impl<'input, T: Input> Scanner<'input, T> {
             buf_leading_break: String::new(),
             buf_trailing_breaks: String::new(),
             buf_whitespaces: String::new(),
+            newlines: 0,
+            comments: Vec::new(),
         }
     }
 
@@ -603,6 +629,7 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.mark.index += 1;
         self.mark.col += 1;
         self.leading_whitespace = false;
+        self.newlines = 0;
     }
 
     /// Consume the next characters. It is assumed none of the next characters are blanks.
@@ -613,6 +640,7 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.mark.index += count;
         self.mark.col += count;
         self.leading_whitespace = false;
+        self.newlines = 0;
     }
 
     /// Consume the next character. It is assumed the next character is a newline.
@@ -624,6 +652,7 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.mark.col = 0;
         self.mark.line += 1;
         self.leading_whitespace = true;
+        self.newlines += 1;
     }
 
     /// Consume a linebreak (either CR, LF or CRLF), if any. Do nothing if there's none.
@@ -710,7 +739,8 @@ impl<'input, T: Input> Scanner<'input, T> {
             self.fetch_stream_start();
             return Ok(());
         }
-        self.skip_to_next_token()?;
+        let scan_mark = self.mark;
+        self.skip_to_next_token(scan_mark)?;
 
         debug_print!(
             "  \x1B[38;5;244m\u{2192} fetch_next_token after whitespace {:?} {:?}\x1B[m",
@@ -721,7 +751,7 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.stale_simple_keys()?;
 
         let mark = self.mark;
-        self.unroll_indent(mark.col as isize);
+        self.unroll_indent_with_comments(mark.col as isize, scan_mark);
 
         self.input.lookahead(4);
 
@@ -757,6 +787,27 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         let c = self.input.peek();
         let nc = self.input.peek_nth(1);
+        // A comment after `:` (or `,` in flow context) belongs to the token
+        // before the indicator.
+        let comment_mark = match self.tokens.back() {
+            Some(Token(span, _))
+                if (self.flow_level == 0 && c == ':') || (self.flow_level > 0 && c == ',') =>
+            {
+                span.start
+            }
+            _ => self.mark,
+        };
+        self.fetch_token_at(c, nc)?;
+        let after_block_entry = matches!(self.tokens.back(), Some(Token(_, TokenType::BlockEntry)));
+        if !after_block_entry {
+            // Sequence indicators alone have no line comments; the comment
+            // becomes a head comment for whatever follows.
+            self.scan_line_comment(comment_mark)?;
+        }
+        Ok(())
+    }
+
+    fn fetch_token_at(&mut self, c: char, nc: char) -> ScanResult {
         match c {
             '[' => self.fetch_flow_collection_start(TokenType::FlowSequenceStart),
             '{' => self.fetch_flow_collection_start(TokenType::FlowMappingStart),
@@ -827,7 +878,12 @@ impl<'input, T: Input> Scanner<'input, T> {
     pub fn fetch_more_tokens(&mut self) -> ScanResult {
         let mut need_more;
         loop {
-            if self.tokens.is_empty() {
+            // go-yaml keeps two tokens of lookahead so that foot comments are
+            // scanned before the events of the tokens preceding them.
+            let stream_ended = matches!(self.tokens.back(), Some(Token(_, TokenType::StreamEnd)));
+            if self.tokens.len() <= 2 && !stream_ended {
+                need_more = true;
+            } else if self.tokens.is_empty() {
                 need_more = true;
             } else {
                 need_more = false;
@@ -842,7 +898,7 @@ impl<'input, T: Input> Scanner<'input, T> {
                 }
             }
 
-            if !need_more {
+            if !need_more || stream_ended {
                 break;
             }
             self.fetch_next_token()?;
@@ -880,9 +936,12 @@ impl<'input, T: Input> Scanner<'input, T> {
     /// # Errors
     /// This function returns an error if a tabulation is encountered where there should not be
     /// one.
-    fn skip_to_next_token(&mut self) -> ScanResult {
+    fn skip_to_next_token(&mut self, scan_mark: Marker) -> ScanResult {
         loop {
             // TODO(chenyh) BOM
+            if self.input.look_ch() == '#' {
+                self.reposition_sequence_line_comment();
+            }
             match self.input.look_ch() {
                 // Tabs may not be used as indentation.
                 // "Indentation" only exists as long as a block is started, but does not exist
@@ -912,9 +971,7 @@ impl<'input, T: Input> Scanner<'input, T> {
                     }
                 }
                 '#' => {
-                    let comment_length = self.input.skip_while_non_breakz();
-                    self.mark.index += comment_length;
-                    self.mark.col += comment_length;
+                    self.scan_comments(scan_mark)?;
                 }
                 _ => break,
             }
@@ -987,6 +1044,270 @@ impl<'input, T: Input> Scanner<'input, T> {
         self.mark.col += n_bytes;
         self.mark.index += n_bytes;
         result.map_err(|msg| ScanError::new_str(self.mark, msg))
+    }
+
+    /// Skip blanks (and tabs when asked) but stop at a `#`, so the comment
+    /// can be recorded by the next scan.
+    fn skip_blanks_keep_comment(&mut self, skip_tabs: bool) -> bool {
+        let mut found_tabs = false;
+        loop {
+            match self.input.look_ch() {
+                ' ' => self.skip_blank(),
+                '\t' if skip_tabs => {
+                    found_tabs = true;
+                    self.skip_blank();
+                }
+                _ => break,
+            }
+        }
+        found_tabs
+    }
+
+    /// A line comment directly after `- ` that heads nested content, such as
+    /// `- # The comment\n  - Some data`, becomes a head comment.
+    fn reposition_sequence_line_comment(&mut self) {
+        let len = self.tokens.len();
+        if self.comments.is_empty() || len < 2 {
+            return;
+        }
+        let token_a = &self.tokens[len - 2].1;
+        let token_b = &self.tokens[len - 1].1;
+        let next_is_break = self.input.next_is_break();
+        let current = self.mark;
+        if let Some(comment) = self.comments.last_mut() {
+            if matches!(token_a, TokenType::BlockSequenceStart)
+                && matches!(token_b, TokenType::BlockEntry)
+                && !comment.line.is_empty()
+                && !next_is_break
+            {
+                comment.head = std::mem::take(&mut comment.line);
+                if comment.start_mark.line + 1 == current.line {
+                    comment.token_mark = current;
+                }
+            }
+        }
+    }
+
+    /// go-yaml's `scanComments`: reads comment lines at the current position
+    /// and records each as a head or foot comment depending on blank lines
+    /// and indentation.
+    fn scan_comments(&mut self, scan_mark: Marker) -> ScanResult {
+        let mut scan_mark = scan_mark;
+        let token = match self.tokens.back() {
+            Some(token) => token.clone(),
+            None => Token(
+                Span::empty(self.mark),
+                TokenType::StreamStart(TEncoding::Utf8),
+            ),
+        };
+        let token = if matches!(token.1, TokenType::FlowEntry) && self.tokens.len() > 1 {
+            self.tokens[self.tokens.len() - 2].clone()
+        } else {
+            token
+        };
+        let token_is_value = matches!(token.1, TokenType::Value);
+        let mut token_mark = token.0.start;
+        let mut start_mark = Marker::default();
+        let mut next_indent = self.indent.max(0) as usize;
+
+        let mut recent_empty = false;
+        let mut first_empty = self.newlines <= 1;
+
+        let mut line = self.mark.line;
+        let mut column = self.mark.col;
+
+        let mut text = String::new();
+
+        // The foot line is the place where a comment must start to still be
+        // considered as a foot of the prior content.
+        let mut foot_line: isize = -1;
+        if scan_mark.line > 0 {
+            foot_line = self.mark.line as isize - self.newlines as isize + 1;
+            if self.newlines == 0 && self.mark.col > 0 {
+                foot_line += 1;
+            }
+        }
+
+        let mut peek = 0usize;
+        while peek < 512 {
+            self.input.lookahead(peek + 1);
+            let c = self.input.peek_nth(peek);
+            let column0 = column;
+            column += 1;
+            if is_blank(c) {
+                peek += 1;
+                continue;
+            }
+            let close_flow = self.flow_level > 0 && (c == ']' || c == '}');
+            if close_flow || is_breakz(c) {
+                if close_flow || !recent_empty {
+                    let dedented = start_mark.col < next_indent;
+                    if close_flow
+                        || (first_empty
+                            && ((start_mark.line as isize == foot_line && !token_is_value)
+                                || dedented))
+                    {
+                        if !text.is_empty() {
+                            if dedented {
+                                token_mark = start_mark;
+                            }
+                            let end_mark = Marker::new(self.mark.index + peek, line, column0);
+                            self.comments.push(Comment {
+                                scan_mark,
+                                token_mark,
+                                start_mark,
+                                end_mark,
+                                foot: std::mem::take(&mut text),
+                                ..Comment::default()
+                            });
+                            scan_mark = end_mark;
+                            token_mark = scan_mark;
+                        }
+                    } else if !text.is_empty() && c != '\0' {
+                        text.push('\n');
+                    }
+                }
+                if !is_break(c) {
+                    break;
+                }
+                first_empty = false;
+                recent_empty = true;
+                column = 0;
+                line += 1;
+                peek += 1;
+                continue;
+            }
+
+            if !text.is_empty()
+                && (close_flow || (column0 < next_indent && column0 != start_mark.col))
+            {
+                // A comment at a different indentation is a foot of the
+                // preceding data rather than a head of the upcoming one.
+                let end_mark = Marker::new(self.mark.index + peek, line, column0);
+                self.comments.push(Comment {
+                    scan_mark,
+                    token_mark,
+                    start_mark,
+                    end_mark,
+                    foot: std::mem::take(&mut text),
+                    ..Comment::default()
+                });
+                scan_mark = end_mark;
+                token_mark = scan_mark;
+            }
+
+            if c != '#' {
+                break;
+            }
+
+            if text.is_empty() {
+                start_mark = Marker::new(self.mark.index + peek, line, column0);
+            } else {
+                text.push('\n');
+            }
+
+            recent_empty = false;
+
+            // Consume until after the comment line.
+            let seen = self.mark.index + peek;
+            loop {
+                let current = self.input.look_ch();
+                if is_breakz(current) {
+                    if self.mark.index >= seen {
+                        break;
+                    }
+                    self.input.lookahead(2);
+                    self.skip_linebreak();
+                } else if self.mark.index >= seen {
+                    text.push(current);
+                    if is_blank(current) {
+                        self.skip_blank();
+                    } else {
+                        self.skip_non_blank();
+                    }
+                } else if is_blank(current) {
+                    self.skip_blank();
+                } else {
+                    self.skip_non_blank();
+                }
+            }
+
+            peek = 0;
+            column = 0;
+            line = self.mark.line;
+            next_indent = self.indent.max(0) as usize;
+        }
+
+        if !text.is_empty() {
+            let end_mark = Marker::new((self.mark.index + peek).saturating_sub(1), line, column);
+            self.comments.push(Comment {
+                scan_mark,
+                token_mark: start_mark,
+                start_mark,
+                end_mark,
+                head: text,
+                ..Comment::default()
+            });
+        }
+        Ok(())
+    }
+
+    /// go-yaml's `scanLineComment`: a comment on the same line as the token
+    /// just scanned.
+    fn scan_line_comment(&mut self, token_mark: Marker) -> ScanResult {
+        if self.newlines > 0 {
+            return Ok(());
+        }
+        let mut start_mark = Marker::default();
+        let mut text = String::new();
+        let mut peek = 0usize;
+        while peek < 512 {
+            self.input.lookahead(peek + 1);
+            let c = self.input.peek_nth(peek);
+            if is_blank(c) {
+                peek += 1;
+                continue;
+            }
+            if c == '#' {
+                let seen = self.mark.index + peek;
+                loop {
+                    let current = self.input.look_ch();
+                    if is_breakz(current) {
+                        if self.mark.index >= seen {
+                            break;
+                        }
+                        self.input.lookahead(2);
+                        self.skip_linebreak();
+                    } else if self.mark.index >= seen {
+                        if text.is_empty() {
+                            start_mark = self.mark;
+                        }
+                        text.push(current);
+                        if is_blank(current) {
+                            self.skip_blank();
+                        } else {
+                            self.skip_non_blank();
+                        }
+                    } else if is_blank(current) {
+                        self.skip_blank();
+                    } else {
+                        self.skip_non_blank();
+                    }
+                }
+            }
+            break;
+        }
+        if !text.is_empty() {
+            self.comments.push(Comment {
+                scan_mark: token_mark,
+                token_mark,
+                start_mark,
+                end_mark: self.mark,
+                line: text,
+                ..Comment::default()
+            });
+        }
+        Ok(())
     }
 
     fn fetch_stream_start(&mut self) {
@@ -1604,7 +1925,8 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         // generate BLOCK-SEQUENCE-START if indented
         self.roll_indent(mark.col, None, TokenType::BlockSequenceStart, mark);
-        let found_tabs = self.skip_ws_to_eol(SkipTabs::Yes)?.found_tabs();
+        // Comments after `-` are kept for the comment scanner.
+        let found_tabs = self.skip_blanks_keep_comment(true);
         self.input.lookahead(2);
         if found_tabs && self.input.next_char_is('-') && is_blank_or_breakz(self.input.peek_nth(1))
         {
@@ -1614,7 +1936,7 @@ impl<'input, T: Input> Scanner<'input, T> {
             ));
         }
 
-        self.skip_ws_to_eol(SkipTabs::No)?;
+        self.skip_blanks_keep_comment(false);
         self.input.lookahead(1);
         if self.input.next_is_break() || self.input.next_is_flow() {
             self.roll_one_col_indent();
@@ -1979,7 +2301,8 @@ impl<'input, T: Input> Scanner<'input, T> {
 
         // From spec: To ensure JSON compatibility, if a key inside a flow mapping is JSON-like,
         // YAML allows the following value to be specified adjacent to the “:”.
-        self.skip_to_next_token()?;
+        let scan_mark = self.mark;
+        self.skip_to_next_token(scan_mark)?;
         self.adjacent_value_allowed_at = self.mark.index;
 
         self.tokens.push_back(tok);
@@ -2630,15 +2953,34 @@ impl<'input, T: Input> Scanner<'input, T> {
     /// If we are in a flow-style construct (which don't have indentation per-se), this function
     /// does nothing.
     fn unroll_indent(&mut self, col: isize) {
+        let mark = self.mark;
+        self.unroll_indent_with_comments(col, mark);
+    }
+
+    /// Unroll indentation, positioning each `BlockEnd` before any foot
+    /// comments of the block that is ending (go-yaml's `unrollIndent`).
+    fn unroll_indent_with_comments(&mut self, col: isize, scan_mark: Marker) {
         if self.flow_level > 0 {
             return;
         }
+        let mut block_mark = scan_mark;
+        block_mark.index = block_mark.index.saturating_sub(1);
         while self.indent > col {
+            let mut stop_index = block_mark.index;
+            for comment in self.comments.iter().rev() {
+                if comment.end_mark.index < stop_index {
+                    break;
+                }
+                if comment.start_mark.col as isize == self.indent {
+                    block_mark = comment.start_mark;
+                }
+                stop_index = comment.scan_mark.index;
+            }
             let indent = self.indents.pop().unwrap();
             self.indent = indent.indent;
             if indent.needs_block_end {
                 self.tokens
-                    .push_back(Token(Span::empty(self.mark), TokenType::BlockEnd));
+                    .push_back(Token(Span::empty(block_mark), TokenType::BlockEnd));
             }
         }
     }

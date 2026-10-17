@@ -181,6 +181,25 @@ pub struct Parser<'input, T: Input> {
     anchor_names: Vec<String>,
     /// Whether the most recent `SequenceStart`/`MappingStart` was flow style.
     last_start_flow: bool,
+    /// Comments unfolded from the scanner but not yet attached to an event.
+    head_comment: String,
+    line_comment: String,
+    foot_comment: String,
+    /// A head comment that belongs to a nested collection rather than its
+    /// first entry (go-yaml's `stem_comment`).
+    stem_comment: String,
+    /// How many scanner comments have been unfolded.
+    comments_head: usize,
+    /// The comments attached to the event most recently produced.
+    event_comments: EventComments,
+}
+
+/// The comments go-yaml attaches to an event.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EventComments {
+    pub head: String,
+    pub line: String,
+    pub foot: String,
 }
 
 impl<T: Input + Clone> Clone for Parser<'_, T> {
@@ -198,6 +217,12 @@ impl<T: Input + Clone> Clone for Parser<'_, T> {
             keep_tags: self.keep_tags,
             anchor_names: self.anchor_names.clone(),
             last_start_flow: self.last_start_flow,
+            head_comment: self.head_comment.clone(),
+            line_comment: self.line_comment.clone(),
+            foot_comment: self.foot_comment.clone(),
+            stem_comment: self.stem_comment.clone(),
+            comments_head: self.comments_head,
+            event_comments: self.event_comments.clone(),
         }
     }
 }
@@ -320,6 +345,12 @@ impl<'input, T: Input> Parser<'input, T> {
             keep_tags: false,
             anchor_names: vec![String::new()],
             last_start_flow: false,
+            head_comment: String::new(),
+            line_comment: String::new(),
+            foot_comment: String::new(),
+            stem_comment: String::new(),
+            comments_head: 0,
+            event_comments: EventComments::default(),
         }
     }
 
@@ -327,6 +358,88 @@ impl<'input, T: Input> Parser<'input, T> {
     #[must_use]
     pub fn last_start_was_flow(&self) -> bool {
         self.last_start_flow
+    }
+
+    /// The comments attached to the event most recently returned.
+    #[must_use]
+    pub fn event_comments(&self) -> &EventComments {
+        &self.event_comments
+    }
+
+    /// go-yaml's `setEventComments`: moves the pending comments onto the
+    /// event being produced.
+    fn set_event_comments(&mut self) {
+        self.event_comments = EventComments {
+            head: std::mem::take(&mut self.head_comment),
+            line: std::mem::take(&mut self.line_comment),
+            foot: std::mem::take(&mut self.foot_comment),
+        };
+        self.stem_comment.clear();
+    }
+
+    /// go-yaml's `UnfoldComments`: joins the scanner's comments that belong
+    /// before `token` into the pending head, line and foot comments.
+    fn unfold_comments(&mut self, token: &Token<'input>) {
+        let token_index = token.0.start.index();
+        let is_block_end = matches!(token.1, TokenType::BlockEnd);
+        while self.comments_head < self.scanner.comments.len()
+            && token_index >= self.scanner.comments[self.comments_head].token_mark.index()
+        {
+            let comment = &self.scanner.comments[self.comments_head];
+            if !comment.head.is_empty() {
+                if is_block_end {
+                    // No heads on ends; keep it for a follow-up token.
+                    break;
+                }
+                if !self.head_comment.is_empty() {
+                    self.head_comment.push('\n');
+                }
+                self.head_comment.push_str(&comment.head);
+            }
+            if !comment.foot.is_empty() {
+                if !self.foot_comment.is_empty() {
+                    self.foot_comment.push('\n');
+                }
+                self.foot_comment.push_str(&comment.foot);
+            }
+            if !comment.line.is_empty() {
+                if !self.line_comment.is_empty() {
+                    self.line_comment.push('\n');
+                }
+                self.line_comment.push_str(&comment.line);
+            }
+            self.scanner.comments[self.comments_head] = Default::default();
+            self.comments_head += 1;
+        }
+    }
+
+    /// go-yaml's `splitStemComment`: when a collection follows a sequence
+    /// entry, the head comment seen before the entry belongs to the
+    /// collection as a whole.
+    fn split_stem_comment(&mut self, stem_len: usize) -> Result<(), ScanError> {
+        if stem_len == 0 {
+            return Ok(());
+        }
+        let next_is_block_start = matches!(
+            self.peek_token()?.1,
+            TokenType::BlockSequenceStart | TokenType::BlockMappingStart
+        );
+        if !next_is_block_start {
+            return Ok(());
+        }
+        let head = std::mem::take(&mut self.head_comment);
+        let stem_len = stem_len.min(head.len());
+        self.stem_comment = head[..stem_len].to_string();
+        if head.len() > stem_len {
+            self.head_comment = head[(stem_len + 1).min(head.len())..].to_string();
+        }
+        Ok(())
+    }
+
+    fn take_stem_comment_as_head(&mut self) {
+        if !self.stem_comment.is_empty() {
+            self.event_comments.head = std::mem::take(&mut self.stem_comment);
+        }
     }
 
     /// Whether to keep tags across multiple documents when parsing.
@@ -412,13 +525,14 @@ impl<'input, T: Input> Parser<'input, T> {
 
     /// Peek at the next token from the scanner.
     fn peek_token(&mut self) -> Result<&Token<'_>, ScanError> {
-        match self.token {
-            None => {
-                self.token = Some(self.scan_next_token()?);
-                Ok(self.token.as_ref().unwrap())
-            }
-            Some(ref tok) => Ok(tok),
+        if self.token.is_none() {
+            let token = self.scan_next_token()?;
+            self.unfold_comments(&token);
+            self.token = Some(token);
+        } else if let Some(token) = self.token.clone() {
+            self.unfold_comments(&token);
         }
+        Ok(self.token.as_ref().unwrap())
     }
 
     /// Extract and return the next token from the scanner.
@@ -464,6 +578,7 @@ impl<'input, T: Input> Parser<'input, T> {
         if self.state == State::End {
             return Ok((Event::StreamEnd, Span::empty(self.scanner.mark())));
         }
+        self.event_comments = EventComments::default();
         let (ev, mark) = self.state_machine()?;
         Ok((ev, mark))
     }
@@ -679,6 +794,7 @@ impl<'input, T: Input> Parser<'input, T> {
         match *self.peek_token()? {
             Token(span, TokenType::StreamEnd) => {
                 self.state = State::End;
+                self.set_event_comments();
                 self.skip();
                 Ok((Event::StreamEnd, span))
             }
@@ -696,6 +812,27 @@ impl<'input, T: Input> Parser<'input, T> {
                 self.parser_process_directives()?;
                 self.push_state(State::DocumentEnd);
                 self.state = State::BlockNode;
+                // A head comment block separated by an empty line is split:
+                // the part above the empty line heads the document.
+                if !self.head_comment.is_empty() {
+                    let head = self.head_comment.clone();
+                    let bytes = head.as_bytes();
+                    let mut i = bytes.len() - 1;
+                    while i > 0 {
+                        if bytes[i] == b'\n' {
+                            if i == bytes.len() - 1 {
+                                self.event_comments.head = head[..i].to_string();
+                                self.head_comment = head[i + 1..].to_string();
+                                break;
+                            } else if bytes[i - 1] == b'\n' {
+                                self.event_comments.head = head[..i - 1].to_string();
+                                self.head_comment = head[i + 1..].to_string();
+                                break;
+                            }
+                        }
+                        i -= 1;
+                    }
+                }
                 Ok((Event::DocumentStart(false), span))
             }
             _ => {
@@ -820,6 +957,10 @@ impl<'input, T: Input> Parser<'input, T> {
             self.state = State::DocumentStart;
         }
 
+        self.set_event_comments();
+        if !self.event_comments.head.is_empty() && self.event_comments.foot.is_empty() {
+            self.event_comments.foot = std::mem::take(&mut self.event_comments.head);
+        }
         Ok((Event::DocumentEnd, span))
     }
 
@@ -859,7 +1000,11 @@ impl<'input, T: Input> Parser<'input, T> {
                                 "while parsing node, found unknown anchor",
                             ));
                         }
-                        Some(id) => return Ok((Event::Alias(*id), span)),
+                        Some(id) => {
+                            let id = *id;
+                            self.set_event_comments();
+                            return Ok((Event::Alias(id), span));
+                        }
                     }
                 }
                 unreachable!()
@@ -903,6 +1048,7 @@ impl<'input, T: Input> Parser<'input, T> {
             Token(_, TokenType::Scalar(..)) => {
                 self.pop_state();
                 if let Token(mark, TokenType::Scalar(style, v)) = self.fetch_token() {
+                    self.set_event_comments();
                     Ok((Event::Scalar(v, style, anchor_id, tag), mark))
                 } else {
                     unreachable!()
@@ -911,21 +1057,25 @@ impl<'input, T: Input> Parser<'input, T> {
             Token(mark, TokenType::FlowSequenceStart) => {
                 self.state = State::FlowSequenceFirstEntry;
                 self.last_start_flow = true;
+                self.set_event_comments();
                 Ok((Event::SequenceStart(anchor_id, tag), mark))
             }
             Token(mark, TokenType::FlowMappingStart) => {
                 self.state = State::FlowMappingFirstKey;
                 self.last_start_flow = true;
+                self.set_event_comments();
                 Ok((Event::MappingStart(anchor_id, tag), mark))
             }
             Token(mark, TokenType::BlockSequenceStart) if block => {
                 self.state = State::BlockSequenceFirstEntry;
                 self.last_start_flow = false;
+                self.take_stem_comment_as_head();
                 Ok((Event::SequenceStart(anchor_id, tag), mark))
             }
             Token(mark, TokenType::BlockMappingStart) if block => {
                 self.state = State::BlockMappingFirstKey;
                 self.last_start_flow = false;
+                self.take_stem_comment_as_head();
                 Ok((Event::MappingStart(anchor_id, tag), mark))
             }
             // ex 7.2, an empty scalar can follow a secondary tag
@@ -971,6 +1121,7 @@ impl<'input, T: Input> Parser<'input, T> {
             }
             Token(mark, TokenType::BlockEnd) => {
                 self.pop_state();
+                self.set_event_comments();
                 self.skip();
                 Ok((Event::MappingEnd, mark))
             }
@@ -1062,6 +1213,7 @@ impl<'input, T: Input> Parser<'input, T> {
         };
 
         self.pop_state();
+        self.set_event_comments();
         self.skip();
         Ok((Event::MappingEnd, span))
     }
@@ -1109,6 +1261,7 @@ impl<'input, T: Input> Parser<'input, T> {
         match *self.peek_token()? {
             Token(mark, TokenType::FlowSequenceEnd) => {
                 self.pop_state();
+                self.set_event_comments();
                 self.skip();
                 return Ok((Event::SequenceEnd, mark));
             }
@@ -1126,6 +1279,7 @@ impl<'input, T: Input> Parser<'input, T> {
         match *self.peek_token()? {
             Token(mark, TokenType::FlowSequenceEnd) => {
                 self.pop_state();
+                self.set_event_comments();
                 self.skip();
                 Ok((Event::SequenceEnd, mark))
             }
@@ -1148,7 +1302,9 @@ impl<'input, T: Input> Parser<'input, T> {
     {
         match *self.peek_token()? {
             Token(mark, TokenType::BlockEntry) => {
+                let prior_head_len = self.head_comment.len();
                 self.skip();
+                self.split_stem_comment(prior_head_len)?;
                 if let Token(
                     _,
                     TokenType::BlockEntry | TokenType::Key | TokenType::Value | TokenType::BlockEnd,
@@ -1185,7 +1341,9 @@ impl<'input, T: Input> Parser<'input, T> {
                 Ok((Event::SequenceEnd, mark))
             }
             Token(mark, TokenType::BlockEntry) => {
+                let prior_head_len = self.head_comment.len();
                 self.skip();
+                self.split_stem_comment(prior_head_len)?;
                 if let Token(_, TokenType::BlockEntry | TokenType::BlockEnd) = *self.peek_token()? {
                     self.state = State::BlockSequenceEntry;
                     Ok((Event::empty_scalar(), mark))
