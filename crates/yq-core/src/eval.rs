@@ -13,6 +13,9 @@ pub struct Evaluator {
     pub now: Option<String>,
     /// Guards against runaway recursion from deeply nested expressions.
     pub depth: usize,
+    /// yq's `--yaml-fix-merge-anchor-to-spec`: explicit keys win over merge
+    /// keys, and earlier merge entries win over later ones.
+    pub fix_merge_anchor_to_spec: bool,
 }
 
 pub type Handler = fn(&mut Evaluator, Context, &ExprNode) -> Result<Context, Error>;
@@ -24,6 +27,7 @@ impl Evaluator {
             env: Vec::new(),
             now: None,
             depth: 0,
+            fix_merge_anchor_to_spec: false,
         }
     }
 

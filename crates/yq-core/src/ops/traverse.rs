@@ -336,13 +336,28 @@ fn do_traverse_map(
     splat: bool,
 ) -> Result<(), Error> {
     let contents = d.arena.get(node).content.clone();
+    let fix_to_spec = d.fix_merge_anchor_to_spec;
+    if !prefs.dont_follow_alias && fix_to_spec {
+        // Merge keys go first so explicit keys override them, later ones
+        // first so earlier merge keys win.
+        let mut index = contents.len();
+        while index >= 2 {
+            index -= 2;
+            let key = contents[index];
+            if d.arena.get(key).tag == "!!merge" {
+                traverse_merge_anchor(d, new_matches, contents[index + 1], wanted, prefs, splat)?;
+            }
+        }
+    }
     let mut index = 0;
     while index + 1 < contents.len() {
         let key = contents[index];
         let value = contents[index + 1];
         let key_tag_is_merge = d.arena.get(key).tag == "!!merge";
         if key_tag_is_merge && !prefs.dont_follow_alias && wanted != d.arena.get(key).value {
-            traverse_merge_anchor(d, new_matches, value, wanted, prefs, splat)?;
+            if !fix_to_spec {
+                traverse_merge_anchor(d, new_matches, value, wanted, prefs, splat)?;
+            }
         } else if splat || key_matches(&d.arena, key, wanted, prefs.exact_key_match) {
             if prefs.include_map_keys {
                 new_matches.set(d.arena.get_key(key), key);
@@ -374,7 +389,11 @@ fn traverse_merge_anchor(
     match d.arena.get(merge).kind {
         Kind::Mapping => do_traverse_map(d, new_matches, merge, wanted, prefs, splat),
         Kind::Sequence => {
-            for child in d.arena.get(merge).content.clone() {
+            let mut content = d.arena.get(merge).content.clone();
+            if d.fix_merge_anchor_to_spec {
+                content.reverse();
+            }
+            for child in content {
                 let mut child = child;
                 if d.arena.get(child).kind == Kind::Alias {
                     child = match d.arena.get(child).alias {
@@ -391,6 +410,17 @@ fn traverse_merge_anchor(
         }
         _ => Ok(()),
     }
+}
+
+/// `traverseMap` with an empty context, as the entries operators use it.
+pub fn traverse_map_by_key(
+    d: &mut Evaluator,
+    node: NodeId,
+    key: &str,
+    prefs: TraversePrefs,
+) -> Result<Vec<NodeId>, Error> {
+    let key_node = d.arena.push(Node::string_scalar(key));
+    traverse_map(d, &Context::default(), node, key_node, prefs, false)
 }
 
 pub fn recursive_descent_operator(

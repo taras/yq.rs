@@ -79,6 +79,10 @@ impl Printer {
                 self.prefs.print_doc_separators,
             ));
         }
+        if self.prefs.format == Format::Json {
+            // The JSON encoder cannot represent aliases, so yq explodes first.
+            crate::ops::meta::explode_node(arena, id, false)?;
+        }
         let node = arena.get(id);
         self.printed_matches = self.printed_matches
             || (node.tag != "!!null" && (node.tag != "!!bool" || node.value != "false"));
