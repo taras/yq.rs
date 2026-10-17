@@ -3,6 +3,7 @@
 //! to_number and the entries family.
 
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 use crate::context::Context;
 use crate::eval::{collect_together, create_boolean_candidate, cross_function, Evaluator};
@@ -113,15 +114,9 @@ pub fn sort_by_operator(
                 compare: compare.nodes().to_vec(),
             });
         }
-        // Insertion sort keeps the comparison stable and lets it borrow `d`.
-        let mut sorted: Vec<Sortable> = Vec::new();
-        for item in sortable {
-            let mut position = sorted.len();
-            while position > 0 && less(d, &item, &sorted[position - 1], &layout) {
-                position -= 1;
-            }
-            sorted.insert(position, item);
-        }
+        // Stable, like Go's sort.Stable, so equal keys keep document order.
+        let mut sorted = sortable;
+        sorted.sort_by(|a, b| compare_sortable(d, a, b, &layout));
         let sorted_list = d.arena.copy_without_content(candidate);
         match d.arena.get(candidate).kind {
             Kind::Mapping => {
@@ -143,17 +138,16 @@ pub fn sort_by_operator(
     Ok(context.child_context(results))
 }
 
-fn less(d: &mut Evaluator, a: &Sortable, b: &Sortable, layout: &str) -> bool {
+fn compare_sortable(d: &mut Evaluator, a: &Sortable, b: &Sortable, layout: &str) -> Ordering {
     let mut index = 0;
     while index < a.compare.len() && index < b.compare.len() {
         match compare_for_sort(d, a.compare[index], b.compare[index], layout) {
-            Ordering::Less => return true,
-            Ordering::Greater => return false,
             Ordering::Equal => {}
+            ordering => return ordering,
         }
         index += 1;
     }
-    a.compare.len() < b.compare.len()
+    a.compare.len().cmp(&b.compare.len())
 }
 
 pub fn sort_keys_operator(
@@ -269,14 +263,13 @@ pub fn unique_by_operator(
         if d.arena.get(candidate).kind != Kind::Sequence {
             return Err(Error("only arrays are supported for unique".to_string()));
         }
-        let mut seen: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         let mut kept: Vec<NodeId> = Vec::new();
         for child in d.arena.get(candidate).content.clone() {
             let rhs =
                 d.get_matching_nodes_opt(context.single_readonly_child_context(child), expr.rhs())?;
             let key = unique_key_value(d, &rhs)?;
-            if !seen.contains(&key) {
-                seen.push(key);
+            if seen.insert(key) {
                 kept.push(child);
             }
         }
@@ -302,7 +295,9 @@ pub fn group_by_operator(
         if d.arena.get(candidate).kind != Kind::Sequence {
             return Err(Error("only arrays are supported for group by".to_string()));
         }
+        // Groups keep first-seen order; the index avoids a scan per child.
         let mut groups: Vec<(String, Vec<NodeId>)> = Vec::new();
+        let mut group_index: HashMap<String, usize> = HashMap::new();
         for child in d.arena.get(candidate).content.clone() {
             let rhs =
                 d.get_matching_nodes_opt(context.single_readonly_child_context(child), expr.rhs())?;
@@ -310,9 +305,12 @@ pub fn group_by_operator(
                 Some(first) => d.arena.get(first).value.clone(),
                 None => "null".to_string(),
             };
-            match groups.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, members)) => members.push(child),
-                None => groups.push((key, vec![child])),
+            match group_index.get(&key) {
+                Some(&position) => groups[position].1.push(child),
+                None => {
+                    group_index.insert(key.clone(), groups.len());
+                    groups.push((key, vec![child]));
+                }
             }
         }
         let result = d
