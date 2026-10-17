@@ -63,6 +63,8 @@ jobs:
       - name: Verify published Rust package and tests
         run: |
           cargo publish --locked --dry-run -p yq-core
+          # The publish dry run does not retain an archive on a clean runner.
+          cargo package --locked -p yq-core
           version='${{ steps.metadata.outputs.version }}'
           package_dir=$(mktemp -d)
           tar -xzf "target/package/yq-core-$version.crate" -C "$package_dir"
