@@ -16,6 +16,10 @@ pub struct Evaluator {
     /// yq's `--yaml-fix-merge-anchor-to-spec`: explicit keys win over merge
     /// keys, and earlier merge entries win over later ones.
     pub fix_merge_anchor_to_spec: bool,
+    /// yq's security preferences. File and system operations never work in
+    /// this engine, but the flags select the error message.
+    pub disable_env_ops: bool,
+    pub disable_file_ops: bool,
 }
 
 pub type Handler = fn(&mut Evaluator, Context, &ExprNode) -> Result<Context, Error>;
@@ -28,6 +32,8 @@ impl Evaluator {
             now: None,
             depth: 0,
             fix_merge_anchor_to_spec: false,
+            disable_env_ops: false,
+            disable_file_ops: false,
         }
     }
 
@@ -244,9 +250,9 @@ fn do_cross_func(
     prefs: &CrossPrefs<'_>,
 ) -> Result<Context, Error> {
     let mut results = Vec::new();
-    let lhs_exp = d.lhs(expr)?;
     let rhs_exp = d.rhs(expr)?;
-    let lhs = d.get_matching_nodes(context.clone_context(), lhs_exp)?;
+    // A unary operator such as `contains(x)` has no LHS; the input is the LHS.
+    let lhs = d.get_matching_nodes_opt(context.clone_context(), expr.lhs())?;
     if prefs.calc_when_empty && !context.is_empty() && lhs.is_empty() {
         results_for_rhs(d, context, None, prefs, rhs_exp, &mut results)?;
     }

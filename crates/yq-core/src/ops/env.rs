@@ -19,6 +19,9 @@ pub fn env_operator(
     context: Context,
     expr: &ExprNode,
 ) -> Result<Context, Error> {
+    if d.disable_env_ops {
+        return Err(Error("env operations have been disabled".to_string()));
+    }
     let name = expr
         .op
         .node
@@ -200,6 +203,9 @@ pub fn envsubst_operator(
     context: Context,
     expr: &ExprNode,
 ) -> Result<Context, Error> {
+    if d.disable_env_ops {
+        return Err(Error("env operations have been disabled".to_string()));
+    }
     let restrictions = match expr.op.prefs {
         Prefs::Env {
             no_unset,

@@ -103,7 +103,8 @@ pub fn is_yaml_non_space(c: char) -> bool {
 #[inline]
 #[must_use]
 pub fn is_anchor_char(c: char) -> bool {
-    is_yaml_non_space(c) && !is_flow(c) && !is_z(c)
+    // go-yaml excludes the colon so `*a: b` parses as an alias key.
+    is_yaml_non_space(c) && !is_flow(c) && !is_z(c) && c != ':'
 }
 
 /// Check whether the character is a valid word character.

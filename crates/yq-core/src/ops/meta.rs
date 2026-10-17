@@ -261,9 +261,11 @@ fn reconstruct_aliased_map(arena: &mut Arena, node: NodeId) -> Result<(), Error>
             override_entry(arena, node, key, value, index, &mut new_content)?;
         } else if arena.get(value).kind == Kind::Sequence {
             let aliases = arena.get(value).content.clone();
-            for alias_node in aliases.iter().rev() {
+            // Go passes the position within the merge list, not within the
+            // map (a shadowed loop variable); the output order depends on it.
+            for (alias_index, alias_node) in aliases.iter().enumerate().rev() {
                 let target = arena.get(*alias_node).alias;
-                apply_alias(arena, node, target, index, &mut new_content)?;
+                apply_alias(arena, node, target, alias_index, &mut new_content)?;
             }
         } else {
             let target = arena.get(value).alias;

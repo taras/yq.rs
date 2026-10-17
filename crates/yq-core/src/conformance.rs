@@ -38,6 +38,8 @@ pub fn run_scenario(scenario: &Scenario) -> Result<Vec<String>, String> {
     evaluator.now = Some(TEST_NOW.to_string());
     // The Go suite runs the `fixed*` groups with the merge-anchor fix on.
     evaluator.fix_merge_anchor_to_spec = scenario.group.starts_with("fixed");
+    evaluator.disable_env_ops = scenario.group == "envOperatorSecurityDisabledScenarios";
+    evaluator.disable_file_ops = scenario.group == "loadOperatorSecurityDisabledScenarios";
     let results = evaluator
         .get_matching_nodes_opt(crate::context::Context::new(inputs), parsed.as_ref())
         .map_err(|e| e.0)?;
