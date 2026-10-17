@@ -9,22 +9,23 @@
    world arrives through `EvalOptions`. This is what keeps it loadable as
    `wasm32-unknown-unknown` with an empty import object.
 4. Prefer no dependency over a dependency. Every crate added to `yq-core`
-   must earn its place in the wasm size report (`scripts/build-wasm.sh`).
+   must earn its place in the wasm size check documented in `README.md`.
    Budget: 2 MB uncompressed, 700 KB gzipped, for the release module.
 5. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must pass.
 
 ## The reference is the Go source, the spec is the fixture
 
-- `scripts/fetch-reference.sh` clones mikefarah/yq into `ref/yq` (gitignored).
-  Port from `ref/yq/pkg/yqlib`. Each operator lives in `operator_<name>.go`
+- Clone the pinned mikefarah/yq reference into `ref/yq` (gitignored) using
+  the commands in `README.md`. Port from `ref/yq/pkg/yqlib`.
+  Each operator lives in `operator_<name>.go`
   with its tests in `operator_<name>_test.go`. The module map in
   `README.md` maps the Go files to the Rust modules.
 - `tests/fixtures/scenarios.json` is the behaviour to match, down to the
   byte. Its README explains the result string format. When the Go code and
   the fixture seem to disagree, the fixture wins; it was dumped from the
   same commit.
-- The local Go `yq` binary, when present, is a second oracle:
-  `scripts/diff-against-yq.sh '<expr>' file.yml`.
+- The local Go `yq` binary, when present, is a second oracle. Compare
+  `yq '<expr>' file.yml` with `cargo run -q -p yq-cli -- '<expr>' file.yml`.
 
 ## Conformance loop
 
@@ -46,7 +47,9 @@ says. When more pass, raise the baseline in the same commit. Never lower it.
 - Keep each PR focused on one operator group or coherent change. The
   smallest PR that serves its purpose; no unrelated improvements.
 - Before pushing: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`, and `scripts/build-wasm.sh` must all succeed.
+  `cargo test`, and `cargo build --release --target wasm32-unknown-unknown -p yq-wasm`
+  must all succeed. Copy the wasm module and check its size as documented in
+  `README.md`.
 
 ## Keeping the documentation current
 

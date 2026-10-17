@@ -1,4 +1,4 @@
-// Smoke test for the wasm module. Run after `scripts/build-wasm.sh`:
+// Smoke test for js/yq.wasm, built using the commands in README.md:
 //   deno run --allow-read js/smoke.ts
 //   bun js/smoke.ts
 //   node --experimental-strip-types js/smoke.ts

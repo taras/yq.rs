@@ -1,7 +1,7 @@
 //! `yq-rs [flags] <expression> [file]`
 //!
-//! Deliberately tiny: it exists so `scripts/diff-against-yq.sh` can compare
-//! yq-core with the reference Go yq on the same input. It is not the product.
+//! Deliberately tiny: it compares yq-core with the reference Go yq on the
+//! same input locally. It is not the product.
 //! Flags mirror the yq ones they copy: -p/--input-format, -o/--output-format,
 //! -I/--indent, -n/--null-input, -r/--unwrapScalar.
 

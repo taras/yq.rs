@@ -67,7 +67,6 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 | `crates/yq-cli` | `yq-rs`, a thin CLI for diffing against the reference yq locally. |
 | `js/yq.ts` | Reference loader, runtime-neutral. `js/smoke.ts` exercises it. |
 | `tests/fixtures` | The conformance fixture and its format description. |
-| `scripts/` | Fetch the Go reference, regenerate the fixture, build the wasm, diff against yq. |
 
 ## Quick start
 
@@ -76,9 +75,17 @@ stripping support, then run:
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo test                      # runs the conformance ratchet, see target/conformance-report.txt
-scripts/build-wasm.sh           # release wasm into js/yq.wasm, prints size
+cargo test
+cargo build --release --target wasm32-unknown-unknown -p yq-wasm
+cp target/wasm32-unknown-unknown/release/yq_wasm.wasm js/yq.wasm
 deno run --allow-read js/smoke.ts
+```
+
+Check the wasm size against the 2 MB uncompressed / 700 KB gzipped budget:
+
+```bash
+wc -c < js/yq.wasm
+gzip -9 -c js/yq.wasm | wc -c
 ```
 
 The same smoke test also runs with:
@@ -94,9 +101,15 @@ For local CLI use:
 printf 'a: [1, 2]\n' | cargo run -q -p yq-cli -- '.a | map(. * 2)'
 ```
 
-To compare behaviour while developing, `scripts/fetch-reference.sh` fetches
-the Go source into `ref/`. See [the fixture README](tests/fixtures/README.md)
-for the conformance result format.
+For a fresh reference checkout matching the conformance fixture:
+
+```bash
+git clone https://github.com/mikefarah/yq.git ref/yq
+git -C ref/yq checkout a814ff5166040ec745a96bddd79ee31c3a548e83
+```
+
+See [the fixture README](tests/fixtures/README.md) for the conformance
+result format.
 
 ## Using yq-core from Rust
 
