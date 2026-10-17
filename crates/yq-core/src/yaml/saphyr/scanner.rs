@@ -1108,13 +1108,15 @@ impl<'input, T: Input> Scanner<'input, T> {
         let token_is_value = matches!(token.1, TokenType::Value);
         let mut token_mark = token.0.start;
         let mut start_mark = Marker::default();
-        let mut next_indent = self.indent.max(0) as usize;
+        let mut next_indent = self.go_indent().max(0);
 
         let mut recent_empty = false;
         let mut first_empty = self.newlines <= 1;
 
+        // Columns follow go-yaml here: 1-based, and incremented before each
+        // peeked character is examined, so recorded marks sit one past it.
         let mut line = self.mark.line;
-        let mut column = self.mark.col;
+        let mut column: isize = self.mark.col as isize + 1;
 
         let mut text = String::new();
 
@@ -1132,7 +1134,6 @@ impl<'input, T: Input> Scanner<'input, T> {
         while peek < 512 {
             self.input.lookahead(peek + 1);
             let c = self.input.peek_nth(peek);
-            let column0 = column;
             column += 1;
             if is_blank(c) {
                 peek += 1;
@@ -1141,7 +1142,7 @@ impl<'input, T: Input> Scanner<'input, T> {
             let close_flow = self.flow_level > 0 && (c == ']' || c == '}');
             if close_flow || is_breakz(c) {
                 if close_flow || !recent_empty {
-                    let dedented = start_mark.col < next_indent;
+                    let dedented = start_mark.col as isize - 1 < next_indent;
                     if close_flow
                         || (first_empty
                             && ((start_mark.line as isize == foot_line && !token_is_value)
@@ -1151,7 +1152,8 @@ impl<'input, T: Input> Scanner<'input, T> {
                             if dedented {
                                 token_mark = start_mark;
                             }
-                            let end_mark = Marker::new(self.mark.index + peek, line, column0);
+                            let end_mark =
+                                Marker::new(self.mark.index + peek, line, column as usize);
                             self.comments.push(Comment {
                                 scan_mark,
                                 token_mark,
@@ -1172,18 +1174,18 @@ impl<'input, T: Input> Scanner<'input, T> {
                 }
                 first_empty = false;
                 recent_empty = true;
-                column = 0;
+                column = 1;
                 line += 1;
                 peek += 1;
                 continue;
             }
 
             if !text.is_empty()
-                && (close_flow || (column0 < next_indent && column0 != start_mark.col))
+                && (close_flow || (column - 1 < next_indent && column != start_mark.col as isize))
             {
                 // A comment at a different indentation is a foot of the
                 // preceding data rather than a head of the upcoming one.
-                let end_mark = Marker::new(self.mark.index + peek, line, column0);
+                let end_mark = Marker::new(self.mark.index + peek, line, column as usize);
                 self.comments.push(Comment {
                     scan_mark,
                     token_mark,
@@ -1201,7 +1203,7 @@ impl<'input, T: Input> Scanner<'input, T> {
             }
 
             if text.is_empty() {
-                start_mark = Marker::new(self.mark.index + peek, line, column0);
+                start_mark = Marker::new(self.mark.index + peek, line, column as usize);
             } else {
                 text.push('\n');
             }
@@ -1232,14 +1234,20 @@ impl<'input, T: Input> Scanner<'input, T> {
                 }
             }
 
-            peek = 0;
-            column = 0;
+            // Go resets `peek` to 0 and the loop's increment skips the line
+            // break that ended the comment, so it is never examined.
+            peek = 1;
+            column = 1;
             line = self.mark.line;
-            next_indent = self.indent.max(0) as usize;
+            next_indent = self.go_indent().max(0);
         }
 
         if !text.is_empty() {
-            let end_mark = Marker::new((self.mark.index + peek).saturating_sub(1), line, column);
+            let end_mark = Marker::new(
+                (self.mark.index + peek).saturating_sub(1),
+                line,
+                column as usize,
+            );
             self.comments.push(Comment {
                 scan_mark,
                 token_mark: start_mark,
@@ -1250,6 +1258,20 @@ impl<'input, T: Input> Scanner<'input, T> {
             });
         }
         Ok(())
+    }
+
+    /// go-yaml's `parser.indent`: the 1-based column of the current block,
+    /// ignoring the one-column non-block indents this scanner adds.
+    fn go_indent(&self) -> isize {
+        let block_indent = match self.indents.last() {
+            Some(indent) if !indent.needs_block_end => indent.indent,
+            _ => self.indent,
+        };
+        if block_indent < 0 {
+            -1
+        } else {
+            block_indent + 1
+        }
     }
 
     /// go-yaml's `scanLineComment`: a comment on the same line as the token
@@ -1280,7 +1302,9 @@ impl<'input, T: Input> Scanner<'input, T> {
                         self.skip_linebreak();
                     } else if self.mark.index >= seen {
                         if text.is_empty() {
-                            start_mark = self.mark;
+                            // Stored with go-yaml's 1-based column.
+                            start_mark =
+                                Marker::new(self.mark.index, self.mark.line, self.mark.col + 1);
                         }
                         text.push(current);
                         if is_blank(current) {
@@ -2966,15 +2990,20 @@ impl<'input, T: Input> Scanner<'input, T> {
         let mut block_mark = scan_mark;
         block_mark.index = block_mark.index.saturating_sub(1);
         while self.indent > col {
-            let mut stop_index = block_mark.index;
-            for comment in self.comments.iter().rev() {
-                if comment.end_mark.index < stop_index {
-                    break;
+            let is_block = self.indents.last().is_none_or(|i| i.needs_block_end);
+            if is_block {
+                // Comment columns are go-yaml's 1-based column plus one, and
+                // go-yaml's indent is 1-based, hence the `+ 2`.
+                let mut stop_index = block_mark.index;
+                for comment in self.comments.iter().rev() {
+                    if comment.end_mark.index < stop_index {
+                        break;
+                    }
+                    if comment.start_mark.col as isize == self.indent + 2 {
+                        block_mark = comment.start_mark;
+                    }
+                    stop_index = comment.scan_mark.index;
                 }
-                if comment.start_mark.col as isize == self.indent {
-                    block_mark = comment.start_mark;
-                }
-                stop_index = comment.scan_mark.index;
             }
             let indent = self.indents.pop().unwrap();
             self.indent = indent.indent;

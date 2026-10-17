@@ -182,10 +182,12 @@ impl<'a> Serializer<'a> {
             && node.kind == Kind::Scalar
             && style & (SINGLE_QUOTED_STYLE | DOUBLE_QUOTED_STYLE | LITERAL_STYLE | FOLDED_STYLE)
                 != 0;
-        let head = if root {
+        let head = node.head_comment.as_bytes().to_vec();
+        // yq prints the root's foot comment itself, after the document.
+        let foot = if root {
             Vec::new()
         } else {
-            node.head_comment.as_bytes().to_vec()
+            node.foot_comment.as_bytes().to_vec()
         };
         match node.kind {
             Kind::Sequence => {
@@ -201,7 +203,7 @@ impl<'a> Serializer<'a> {
                 }
                 let mut event = Event::new(EventType::SequenceEnd);
                 event.line_comment = node.line_comment.as_bytes().to_vec();
-                event.foot_comment = node.foot_comment.as_bytes().to_vec();
+                event.foot_comment = foot;
                 self.emitter.emit(event)?;
             }
             Kind::Mapping => {
@@ -226,7 +228,7 @@ impl<'a> Serializer<'a> {
                 let mut event = Event::new(EventType::MappingEnd);
                 event.tail_comment = pending_tail;
                 event.line_comment = node.line_comment.as_bytes().to_vec();
-                event.foot_comment = node.foot_comment.as_bytes().to_vec();
+                event.foot_comment = foot;
                 self.emitter.emit(event)?;
             }
             Kind::Alias => {
@@ -234,7 +236,7 @@ impl<'a> Serializer<'a> {
                 event.anchor = node.value.as_bytes().to_vec();
                 event.head_comment = head;
                 event.line_comment = node.line_comment.as_bytes().to_vec();
-                event.foot_comment = node.foot_comment.as_bytes().to_vec();
+                event.foot_comment = foot;
                 self.emitter.emit(event)?;
             }
             Kind::Scalar => {
@@ -260,7 +262,7 @@ impl<'a> Serializer<'a> {
                     scalar_style,
                     head,
                     node.line_comment.as_bytes().to_vec(),
-                    node.foot_comment.as_bytes().to_vec(),
+                    foot,
                     tail.to_vec(),
                 )?;
             }
