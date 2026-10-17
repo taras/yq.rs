@@ -12,7 +12,7 @@ need `shuffle`, whose output depends on Go's random number generator).
 The conformance fixture comes from yq commit `a814ff5`: 1,121 scenarios,
 with 10 skipped for XML/JSON-only decoders. The measured release module is
 528,353 bytes (210,129 bytes gzipped), within the 2 MB / 700 KB budget.
-The loader's smoke tests pass under Deno, Bun and Node.
+The package's smoke tests run under Node and Bun.
 
 ## Scope
 
@@ -65,20 +65,22 @@ Go yq accepts `a: "x"#c`, while this parser requires a space before `#`.
 | `crates/yq-core` | The engine. Pure Rust, no I/O, no platform dependencies. |
 | `crates/yq-wasm` | `cdylib` with a hand-written ABI (`yq_alloc`, `yq_eval`, `yq_free`, `yq_result_free`). No wasm-bindgen. |
 | `crates/yq-cli` | `yq-rs`, a thin CLI for diffing against the reference yq locally. |
-| `js/yq.ts` | Reference loader, runtime-neutral. `js/smoke.ts` exercises it. |
+| `js/` | Wasm loader, inline package build, declarations and installed-package smoke tests. |
 | `crates/yq-core/tests/fixtures` | The conformance fixture and its format description, included in the published crate. |
 
 ## Quick start
 
-Install Rust with Cargo and at least one of Deno, Bun or Node with TypeScript
-stripping support, then run:
+For development, install Rust through rustup, Node 22 or newer, and Bun.
+The toolchain file pins Rust and installs the wasm target automatically.
+From a checkout, run:
 
 ```bash
-rustup target add wasm32-unknown-unknown
 cargo test
 cargo build --release --target wasm32-unknown-unknown -p yq-wasm
 cp target/wasm32-unknown-unknown/release/yq_wasm.wasm js/yq.wasm
-deno run --allow-read js/smoke.ts
+npm ci
+npm run build
+npm test
 ```
 
 Check the wasm size against the 2 MB uncompressed / 700 KB gzipped budget:
@@ -88,12 +90,9 @@ wc -c < js/yq.wasm
 gzip -9 -c js/yq.wasm | wc -c
 ```
 
-The same smoke test also runs with:
-
-```bash
-bun js/smoke.ts
-node --experimental-strip-types js/smoke.ts
-```
+`npm test` packs and installs the built package in an isolated directory,
+then exercises its inline and raw entries under both Node and Bun. Use
+`npm run smoke:node` or `npm run smoke:bun` to test a single runtime.
 
 For local CLI use:
 
@@ -137,20 +136,46 @@ is required.
 
 ## Using the module
 
+Install the same package in Node or Bun:
+
+```bash
+npm install @executablemd/yq
+# or: bun add @executablemd/yq
+```
+
 ```ts
-import { createYq } from "./js/yq.ts";
-const yq = await createYq(await Deno.readFile("js/yq.wasm"));
+import { yq, createYq } from "@executablemd/yq";
+
 yq.evaluate(".a.b[0]", "a:\n  b: [1, 2]\n");          // "1\n"
 yq.evaluate(".[] | .name", '[{"name":"Ada"}]', {
   inputFormat: "json",
   outputFormat: "json",
 });                                               // '"Ada"\n'
+
+const isolated = await createYq();
+isolated.evaluate(".name", "name: Ada\n");          // "Ada\n"
 ```
 
-`createYq` accepts wasm bytes or a compiled `WebAssembly.Module` and
-instantiates it with an empty import object. In Bun or Node, read the bytes
-with `readFile` from `node:fs/promises`; in a browser, use
-`new Uint8Array(await (await fetch("/yq.wasm")).arrayBuffer())`.
+The primary import embeds wasm as base64: it needs no file access or
+TypeScript runtime support. It exports a ready `yq` instance and an async
+`createYq()` factory for independent instances. `@executablemd/yq/inline`
+provides the same entry. No CLI binary is included; CLI parity remains a
+separate decision.
+
+For bundlers or hosts that load wasm themselves, use the raw asset and
+explicit loader:
+
+```ts
+import { readFile } from "node:fs/promises";
+import { createYq } from "@executablemd/yq/loader";
+
+const bytes = await readFile(new URL(import.meta.resolve("@executablemd/yq/yq.wasm")));
+const yq = await createYq(bytes);
+```
+
+The explicit loader also accepts a compiled `WebAssembly.Module`; bundlers
+can resolve `@executablemd/yq/yq.wasm` as an asset URL. The module
+instantiates with an empty import object.
 `evaluate` returns the printed output and throws `YqError` on evaluation
 errors.
 
@@ -342,8 +367,8 @@ Go's number formatting while keeping serde out of the wasm binary.
 
 ### WebAssembly ABI and host boundary
 
-A handwritten ABI keeps the same module usable in Deno, Bun, Node and
-browsers without generated wasm-bindgen glue or matching CLI versions.
+A handwritten ABI keeps the module usable in Node and Bun without
+generated wasm-bindgen glue or matching CLI versions.
 `yq-core` receives all external values through `EvalOptions`; the wasm
 module instantiates with an empty import object. An expression can only
 read the environment variables and file contents supplied by its host.

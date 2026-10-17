@@ -1,7 +1,3 @@
-// Reference loader for the yq-wasm module. Runtime-neutral: it only uses the
-// WebAssembly and TextEncoder/TextDecoder globals, so the same file works in
-// Deno, Bun, Node and browsers. Reading the .wasm bytes is the caller's job.
-
 export type Format = "yaml" | "json";
 
 export interface EvalOptions {
@@ -66,9 +62,10 @@ export async function createYq(source: BufferSource | WebAssembly.Module): Promi
 
   return {
     evaluate(expression, input, options = {}) {
+      const optionsJson = JSON.stringify(options);
       const [exprPtr, exprLen] = write(expression);
       const [inputPtr, inputLen] = write(input);
-      const [optsPtr, optsLen] = write(JSON.stringify(options));
+      const [optsPtr, optsLen] = write(optionsJson);
       const header = exports.yq_eval(exprPtr, exprLen, inputPtr, inputLen, optsPtr, optsLen);
       try {
         const view = new DataView(exports.memory.buffer, header, 12);
