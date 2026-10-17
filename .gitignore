@@ -4,3 +4,4 @@
 /js/*.wasm
 *.wasm.gz
 /.supervisor
+/.claude/worktrees
