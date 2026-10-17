@@ -47,6 +47,11 @@ for (const [name, engine] of engines) {
   for (const [expression, input, expected, options] of cases) {
     assert.equal(engine.evaluate(expression, input, options), expected, `${name}: ${expression}`);
   }
+  assert.deepEqual(engine.evaluateWithStatus("false", "", { nullInput: true }), { output: "false\n", matched: false });
+  assert.deepEqual(engine.evaluateWithStatus('"false"', "", { nullInput: true }), { output: "false\n", matched: true });
+  assert.equal(engine.evaluate(".a", "a: one\n---\na: two\n", { printDocSeparators: false }), "one\ntwo\n");
+  assert.deepEqual(engine.evaluateSequenceWithStatus(".a", ["a: one\n", "---\na: two\n"]), { output: "one\n---\ntwo\n", matched: true });
+  assert.throws(() => engine.evaluateSequenceWithStatus(".a", ["a: one\n", "[invalid"]), error => error instanceof inline.YqError && error.output === "one\n");
   assert.throws(() => engine.evaluate("[", ""), inline.YqError);
   assert.throws(() => engine.evaluate(".", "a: ["), inline.YqError);
   assert.throws(() => engine.evaluate(".", "", { unsupportedOption: true }), /unknown option: unsupportedOption/);

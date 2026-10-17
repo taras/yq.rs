@@ -1,5 +1,5 @@
 //! Hand-written wasm ABI. No wasm-bindgen, so the module loads with
-//! `WebAssembly.instantiate` alone in Deno, Bun, Node and browsers.
+//! `WebAssembly.instantiate` alone in Node, Bun and browsers.
 //! `README.md` has the contract; `js/yq.ts` is the reference loader.
 //!
 //! Memory protocol:
@@ -44,18 +44,113 @@ pub unsafe extern "C" fn yq_eval(
     opts_ptr: *const u8,
     opts_len: u32,
 ) -> *mut ResultHeader {
+    evaluate_abi(
+        expr_ptr, expr_len, input_ptr, input_len, opts_ptr, opts_len, false,
+    )
+}
+
+/// # Safety
+/// All pointers must come from `yq_alloc` and hold valid UTF-8 of the given length.
+/// Status 2 indicates successful evaluation without a truthy result.
+#[no_mangle]
+pub unsafe extern "C" fn yq_eval_with_status(
+    expr_ptr: *const u8,
+    expr_len: u32,
+    input_ptr: *const u8,
+    input_len: u32,
+    opts_ptr: *const u8,
+    opts_len: u32,
+) -> *mut ResultHeader {
+    evaluate_abi(
+        expr_ptr, expr_len, input_ptr, input_len, opts_ptr, opts_len, true,
+    )
+}
+
+unsafe fn evaluate_abi(
+    expr_ptr: *const u8,
+    expr_len: u32,
+    input_ptr: *const u8,
+    input_len: u32,
+    opts_ptr: *const u8,
+    opts_len: u32,
+    report_status: bool,
+) -> *mut ResultHeader {
     let expression = read_str(expr_ptr, expr_len);
     let input = read_str(input_ptr, input_len);
     let options_json = read_str(opts_ptr, opts_len);
-
     let outcome = match parse_options(options_json) {
-        Ok(options) => yq_core::evaluate(expression, input, &options).map_err(|e| e.0),
+        Ok(options) => yq_core::evaluate_with_status(expression, input, &options).map_err(|e| e.0),
         Err(message) => Err(message),
     };
     let (status, text) = match outcome {
-        Ok(text) => (0, text),
+        Ok(result) => (
+            if report_status && !result.matched {
+                2
+            } else {
+                0
+            },
+            result.output,
+        ),
         Err(message) => (1, message),
     };
+    result_header(status, text)
+}
+
+/// # Safety
+/// Argument pointers follow `yq_eval`. Input is a JSON object whose string
+/// values are evaluated in order as independent files with a shared printer.
+/// Status 3 carries JSON `{ "output": ..., "error": ... }` for partial failure.
+#[no_mangle]
+pub unsafe extern "C" fn yq_eval_sequence(
+    expr_ptr: *const u8,
+    expr_len: u32,
+    input_ptr: *const u8,
+    input_len: u32,
+    opts_ptr: *const u8,
+    opts_len: u32,
+) -> *mut ResultHeader {
+    let expression = read_str(expr_ptr, expr_len);
+    let input_json = read_str(input_ptr, input_len);
+    let options_json = read_str(opts_ptr, opts_len);
+    let outcome = parse_options(options_json)
+        .and_then(|options| flat_json_pairs(input_json).map(|inputs| (options, inputs)));
+    match outcome {
+        Ok((options, inputs)) => {
+            let inputs: Vec<&str> = inputs.iter().map(|(_, text)| text.as_str()).collect();
+            match yq_core::evaluate_sequence_with_status(expression, &inputs, &options) {
+                Ok(result) => result_header(if result.matched { 0 } else { 2 }, result.output),
+                Err(failure) => result_header(
+                    3,
+                    format!(
+                        "{{\"output\":{},\"error\":{}}}",
+                        json_string(&failure.output),
+                        json_string(&failure.error.0)
+                    ),
+                ),
+            }
+        }
+        Err(message) => result_header(1, message),
+    }
+}
+
+fn json_string(value: &str) -> String {
+    let mut output = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            c if c < ' ' => output.push_str(&format!("\\u{:04x}", c as u32)),
+            c => output.push(c),
+        }
+    }
+    output.push('\"');
+    output
+}
+
+fn result_header(status: u32, text: String) -> *mut ResultHeader {
     let mut bytes = text.into_bytes();
     bytes.shrink_to_fit();
     let header = Box::new(ResultHeader {
@@ -68,7 +163,7 @@ pub unsafe extern "C" fn yq_eval(
 }
 
 /// # Safety
-/// `header` must come from `yq_eval` and not have been freed already.
+/// `header` must come from an evaluation export and not have been freed already.
 #[no_mangle]
 pub unsafe extern "C" fn yq_result_free(header: *mut ResultHeader) {
     let header = Box::from_raw(header);
@@ -103,6 +198,7 @@ fn parse_options(json: &str) -> Result<EvalOptions, String> {
             }
             "nullInput" => options.null_input = value == "true",
             "unwrapScalar" => options.unwrap_scalar = Some(value == "true"),
+            "printDocSeparators" => options.print_doc_separators = value == "true",
             "now" => options.now = Some(value),
             "env" => options.env = flat_json_pairs(&value)?,
             "files" => options.files = flat_json_pairs(&value)?,

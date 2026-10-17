@@ -16,10 +16,21 @@ export interface EvalOptions {
    * Defaults to true for YAML output and false for JSON, as yq does.
    */
   unwrapScalar?: boolean;
+  /** Emit YAML document separators; false implements yq's `-N`. */
+  printDocSeparators?: boolean;
+}
+
+export interface Evaluation {
+  output: string;
+  matched: boolean;
 }
 
 export interface Yq {
   evaluate(expression: string, input: string, options?: EvalOptions): string;
+  /** Also report whether any result was neither null nor boolean false. */
+  evaluateWithStatus(expression: string, input: string, options?: EvalOptions): Evaluation;
+  /** Independent inputs with shared printing. Errors retain earlier output. */
+  evaluateSequenceWithStatus(expression: string, inputs: string[], options?: EvalOptions): Evaluation;
 }
 
 interface Exports {
@@ -34,11 +45,13 @@ interface Exports {
     optsPtr: number,
     optsLen: number,
   ): number;
+  yq_eval_with_status: Exports["yq_eval"];
+  yq_eval_sequence: Exports["yq_eval"];
   yq_result_free(header: number): void;
 }
 
 export class YqError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly output = "") {
     super(message);
     this.name = "YqError";
   }
@@ -60,29 +73,43 @@ export async function createYq(source: BufferSource | WebAssembly.Module): Promi
     return [ptr, bytes.length];
   };
 
+  const evaluate = (expression: string, input: string, options: EvalOptions = {}, reportStatus = false, sequence = false): Evaluation => {
+    const optionsJson = JSON.stringify(options);
+    const [exprPtr, exprLen] = write(expression);
+    const [inputPtr, inputLen] = write(input);
+    const [optsPtr, optsLen] = write(optionsJson);
+    const run = sequence ? exports.yq_eval_sequence : reportStatus ? exports.yq_eval_with_status : exports.yq_eval;
+    const header = run(exprPtr, exprLen, inputPtr, inputLen, optsPtr, optsLen);
+    try {
+      const view = new DataView(exports.memory.buffer, header, 12);
+      const status = view.getUint32(0, true);
+      const ptr = view.getUint32(4, true);
+      const len = view.getUint32(8, true);
+      const text = decoder.decode(new Uint8Array(exports.memory.buffer, ptr, len));
+      if (sequence && status === 3) {
+        const failure = JSON.parse(text);
+        throw new YqError(failure.error, failure.output);
+      }
+      if (status !== 0 && !(reportStatus && status === 2)) {
+        throw new YqError(text);
+      }
+      return { output: text, matched: status === 0 };
+    } finally {
+      exports.yq_result_free(header);
+      exports.yq_free(exprPtr, exprLen);
+      exports.yq_free(inputPtr, inputLen);
+      exports.yq_free(optsPtr, optsLen);
+    }
+  };
   return {
     evaluate(expression, input, options = {}) {
-      const optionsJson = JSON.stringify(options);
-      const [exprPtr, exprLen] = write(expression);
-      const [inputPtr, inputLen] = write(input);
-      const [optsPtr, optsLen] = write(optionsJson);
-      const header = exports.yq_eval(exprPtr, exprLen, inputPtr, inputLen, optsPtr, optsLen);
-      try {
-        const view = new DataView(exports.memory.buffer, header, 12);
-        const status = view.getUint32(0, true);
-        const ptr = view.getUint32(4, true);
-        const len = view.getUint32(8, true);
-        const text = decoder.decode(new Uint8Array(exports.memory.buffer, ptr, len));
-        if (status !== 0) {
-          throw new YqError(text);
-        }
-        return text;
-      } finally {
-        exports.yq_result_free(header);
-        exports.yq_free(exprPtr, exprLen);
-        exports.yq_free(inputPtr, inputLen);
-        exports.yq_free(optsPtr, optsLen);
-      }
+      return evaluate(expression, input, options).output;
+    },
+    evaluateWithStatus(expression, input, options = {}) {
+      return evaluate(expression, input, options, true);
+    },
+    evaluateSequenceWithStatus(expression, inputs, options = {}) {
+      return evaluate(expression, JSON.stringify(Object.fromEntries(inputs.map((text, index) => [index, text]))), options, true, true);
     },
   };
 }

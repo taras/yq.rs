@@ -22,7 +22,7 @@ try {
     encoding: "utf8",
   }))[0];
   const paths = packed.files.map(file => file.path);
-  for (const required of ["dist/inline.js", "dist/inline.d.ts", "dist/yq.js", "dist/yq.d.ts", "dist/yq.wasm", "LICENSE", "THIRD_PARTY_NOTICES.md"]) {
+  for (const required of ["dist/cli.mjs", "dist/inline.js", "dist/inline.d.ts", "dist/yq.js", "dist/yq.d.ts", "dist/yq.wasm", "LICENSE", "THIRD_PARTY_NOTICES.md"]) {
     assert.ok(paths.includes(required), `Missing package file: ${required}`);
   }
   assert.ok(paths.some(path => path.startsWith("crates/yq-core/licenses/")), "Missing third-party license texts");
@@ -33,13 +33,16 @@ try {
     cwd: fixture,
   });
   await copyFile(new URL("./smoke.mjs", import.meta.url), join(fixture, "smoke.mjs"));
-  await writeFile(join(fixture, "consumer.mts"), `import { createYq, yq, YqError, type EvalOptions, type Yq } from "yq.rs";
+  await writeFile(join(fixture, "consumer.mts"), `import { createYq, yq, YqError, type EvalOptions, type Evaluation, type Yq } from "yq.rs";
 import { createYq as createInline } from "yq.rs/inline";
 import { createYq as loadBytes } from "yq.rs/loader";
 const options: EvalOptions = { inputFormat: "yaml", outputFormat: "json", indent: 2, nullInput: false, unwrapScalar: false, env: { A: "b" }, now: "2026-10-17T00:00:00Z", files: { "a.yml": "a: b" } };
 const instance: Yq = await createYq();
 yq.evaluate(".", "a: b", options);
 instance.evaluate(".", "a: b");
+const result: Evaluation = instance.evaluateSequenceWithStatus(".a", ["a: b", "a: c"]);
+result.output.toUpperCase();
+result.matched.valueOf();
 await createInline();
 await loadBytes(new Uint8Array());
 new YqError("message");
@@ -53,11 +56,14 @@ await createYq(new Uint8Array());
     stdio: "inherit",
   });
   const metadata = JSON.parse(await readFile(join(fixture, "node_modules/yq.rs/package.json"), "utf8"));
-  // No CLI yet; https://github.com/taras/yq.rs/issues/6 adds a `yq` bin and
-  // replaces this assertion with checks on it.
-  assert.equal(metadata.bin, undefined);
+  assert.equal(metadata.bin.yq, "dist/cli.mjs");
   for (const runtime of runtimes) {
-    execFileSync(runtime === "node" ? process.execPath : runtime, [join(fixture, "smoke.mjs")], {
+    const command = runtime === "node" ? process.execPath : runtime;
+    const bin = join(fixture, "node_modules/.bin/yq");
+    assert.equal(execFileSync(command, [bin, ".name"], { cwd: fixture, input: "name: Ada\n", encoding: "utf8" }), "Ada\n");
+    assert.equal(execFileSync(command, [bin, "-ne", '\"false\"'], { cwd: fixture, encoding: "utf8" }), "false\n");
+    assert.match(execFileSync(command, [bin, "--version"], { cwd: fixture, encoding: "utf8" }), /Go yq v4\.54\.1/);
+    execFileSync(command, [join(fixture, "smoke.mjs")], {
       cwd: fixture,
       stdio: "inherit",
     });

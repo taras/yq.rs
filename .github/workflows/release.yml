@@ -60,6 +60,23 @@ jobs:
           npm run typecheck
           npm run build
           npm test
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.0"
+          cache: false
+      - name: Check out pinned Go oracle
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mikefarah/yq
+          ref: a814ff5166040ec745a96bddd79ee31c3a548e83
+          path: ref/yq
+          persist-credentials: false
+      - name: Compare installed CLI with Go yq on Node and Bun
+        run: |
+          (cd ref/yq && go build -o ../yq-ref .)
+          npm run test:cli
+        env:
+          GOTOOLCHAIN: local
       - name: Verify published Rust package and tests
         run: |
           cargo publish --locked --dry-run -p yq-core

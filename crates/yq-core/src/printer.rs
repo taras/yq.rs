@@ -36,6 +36,10 @@ impl Printer {
         }
     }
 
+    pub fn printed_matches(&self) -> bool {
+        self.printed_matches
+    }
+
     pub fn into_output(self) -> String {
         self.out
     }
@@ -94,6 +98,7 @@ impl Printer {
         };
         self.out.push_str(&text);
         self.previous_doc_index = document;
+        self.previous_file_index = file_index;
         Ok(())
     }
 }

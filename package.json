@@ -33,7 +33,8 @@
     "test": "node js/package-test.mjs",
     "smoke:node": "node js/package-test.mjs node",
     "smoke:bun": "node js/package-test.mjs bun",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:cli": "node js/cli-test.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -50,5 +51,8 @@
   },
   "devDependencies": {
     "typescript": "5.9.3"
+  },
+  "bin": {
+    "yq": "dist/cli.mjs"
   }
 }
