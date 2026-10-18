@@ -51,5 +51,12 @@
     "os": "win32",
     "cpu": "x64",
     "runner": "windows-2025"
+  },
+  {
+    "id": "win32-arm64",
+    "target": "aarch64-pc-windows-msvc",
+    "os": "win32",
+    "cpu": "arm64",
+    "runner": "windows-11-arm"
   }
 ]

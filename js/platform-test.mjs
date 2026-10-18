@@ -11,7 +11,8 @@ for (const [os, arch, report, expected] of [
   ["linux", "x64", musl, "linux-x64-musl"],
   ["win32", "x64", glibc, "win32-x64"],
   ["linux", "arm64", musl, "linux-arm64-musl"],
-  ["win32", "arm64", glibc, undefined],
+  ["win32", "arm64", glibc, "win32-arm64"],
+  ["win32", "ia32", glibc, undefined],
   ["freebsd", "x64", glibc, undefined],
 ]) {
   assert.equal(platformTarget(os, arch, report), expected);

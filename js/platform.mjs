@@ -9,8 +9,8 @@ export function platformTarget(platform = process.platform, arch = process.arch,
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) {
     return `${platform}-${arch}`;
   }
-  if (platform === "win32" && arch === "x64") {
-    return "win32-x64";
+  if (platform === "win32" && (arch === "x64" || arch === "arm64")) {
+    return `win32-${arch}`;
   }
   if (platform === "linux" && (arch === "arm64" || arch === "x64")) {
     const glibc = report()?.header?.glibcVersionRuntime;

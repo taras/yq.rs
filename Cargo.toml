@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/yq-core", "crates/yq-wasm", "crates/yq-cli", "crates/yq-node"]
+members = ["crates/yq-core", "crates/yq-wasm", "crates/yq-cli"]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "MIT AND Apache-2.0"
 repository = "https://github.com/taras/yq.rs"

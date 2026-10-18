@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -46,11 +46,19 @@ export declare function createYq(): Promise<Yq>;
 export declare const yq: Yq;
 `);
 
-await copyFile(new URL("./native.mjs", import.meta.url), new URL("../dist/native.mjs", import.meta.url));
-await writeFile(new URL("../dist/native.d.ts", import.meta.url), `import type { Yq } from "./yq.js";
-export { YqError } from "./yq.js";
-export type { EvalOptions, Evaluation, Format, Yq } from "./yq.js";
-export declare const backend: "native" | "wasm";
-export declare function createYq(): Promise<Yq>;
-export declare const yq: Yq;
-`);
+const platforms = JSON.parse(await readFile(new URL("../.github/release/platforms.json", import.meta.url), "utf8"));
+for (const platform of platforms) {
+  const executable = platform.os === "win32" ? "yq.exe" : "yq";
+  const source = new URL(`../target/native-artifacts/yq-${platform.id}${platform.os === "win32" ? ".exe" : ""}`, import.meta.url);
+  const destination = new URL(`../dist/native/${platform.id}/${executable}`, import.meta.url);
+  await mkdir(new URL(`../dist/native/${platform.id}/`, import.meta.url), { recursive: true });
+  try {
+    await copyFile(source, destination);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      continue;
+    }
+    throw error;
+  }
+  await chmod(destination, 0o755);
+}
