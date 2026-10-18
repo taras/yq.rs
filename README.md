@@ -384,19 +384,26 @@ Run installed-package CLI comparisons against the pinned Go oracle with:
 
 ```bash
 (cd ref/yq && go build -o ../yq-ref .)
+# Build and stage the host binary, then rebuild the npm package first.
+# For example, on macOS arm64:
+python3 .github/release/build_native.py darwin-arm64
+npm run build
 npm run test:cli
 # An external oracle path can be supplied with YQ_REFERENCE=/path/to/yq.
-# Add -- node, -- bun or -- native to test a single runtime.
+# Add -- node, -- bun, -- native or -- launcher to test a single runtime.
 # Set YQ_NATIVE=/path/to/yq to use a different native build.
 ```
 
 This command requires the oracle and compares stdout, stderr, exit status,
-and in-place output across the wasm Node/Bun CLIs and native binary. Decoder error wording can differ from Go outside the
+and in-place output across the wasm Node/Bun CLIs, native binary and installed
+Node launcher. The launcher runtime unsets `YQ_FORCE_WASM` and hides the
+installed wasm CLI and inline module, so every comparison must use its bundled
+native binary. Decoder error wording can differ from Go outside the
 conformance fixture; the tests check retained output and failure status
 separately for those cases. The regular `npm test` also tests the installed
 CLI on both runtimes without requiring Go. CI also builds the pinned Go
 oracle with Go 1.26.0 and runs the full comparison command. Windows x64 and
-arm64 jobs also run the native comparison suite. POSIX broken-pipe checks
+arm64 jobs also run the native and launcher comparison suites. POSIX broken-pipe checks
 run on Unix; Windows file-not-found wording is normalized to the engine's
 portable diagnostic for comparisons.
 

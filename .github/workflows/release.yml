@@ -135,7 +135,7 @@ jobs:
           ref: a814ff5166040ec745a96bddd79ee31c3a548e83
           path: ref/yq
           persist-credentials: false
-      - name: Compare installed CLI with Go yq on Node and Bun
+      - name: Compare wasm, native and installed launcher CLIs with Go yq
         run: |
           (cd ref/yq && go build -o ../yq-ref .)
           npm run test:cli
@@ -193,7 +193,7 @@ jobs:
           ref: a814ff5166040ec745a96bddd79ee31c3a548e83
           path: ref/yq
           persist-credentials: false
-      - name: Compare Windows native CLI with Go yq
+      - name: Compare Windows native and installed launcher CLIs with Go yq
         if: matrix.os == 'win32'
         shell: bash
         run: |
@@ -202,7 +202,7 @@ jobs:
           export YQ_PACKAGE_TARBALL="$PWD/target/release-artifacts/yq.rs-$version.tgz"
           export YQ_REFERENCE="$PWD/ref/yq-ref.exe"
           export YQ_NATIVE="$PWD/target/release-artifacts/yq-${{ matrix.id }}.exe"
-          node js/cli-test.mjs native
+          node js/cli-test.mjs native launcher
         env:
           GOTOOLCHAIN: local
 

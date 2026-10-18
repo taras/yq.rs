@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { platformTarget } from "./platform.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const requested = process.argv.slice(2);
-const runtimes = requested.length === 0 ? ["node", "bun", "native"] : requested;
+const runtimes = requested.length === 0 ? ["node", "bun", "native", "launcher"] : requested;
 for (const runtime of runtimes) {
-  assert.ok(runtime === "node" || runtime === "bun" || runtime === "native", `Unsupported CLI test runtime: ${runtime}`);
+  assert.ok(["node", "bun", "native", "launcher"].includes(runtime), `Unsupported CLI test runtime: ${runtime}`);
 }
 const reference = resolve(root, process.env.YQ_REFERENCE ?? "ref/yq-ref");
 const environment = { ...process.env, YQ_FORCE_WASM: "1", NO_COLOR: "1", TERM: "dumb", YQ_CLI_TEST_NUMBER: "42", YQ_CLI_TEST_TEXT: "hello world", YQ_CLI_TEST_SPECIAL: 'quoted "braces {and}"\b\f' };
@@ -197,8 +198,28 @@ try {
     ["invalid expression token", ["-n", "invalid()"]],
   ];
 
+  const wasmPaths = ["inline.js", "cli-wasm.mjs"].map(name => join(packageRoot, "dist", name));
+  let wasmHidden = false;
   for (const runtime of runtimes) {
-    const command = runtime === "native" ? resolve(root, process.env.YQ_NATIVE ?? `target/release/yq${process.platform === "win32" ? ".exe" : ""}`) : runtime === "node" ? process.execPath : runtime;
+    if (runtime === "node" || runtime === "bun") {
+      environment.YQ_FORCE_WASM = "1";
+    } else {
+      delete environment.YQ_FORCE_WASM;
+    }
+    const hideWasm = runtime === "launcher";
+    if (hideWasm) {
+      const target = platformTarget();
+      assert.ok(target, "Launcher parity requires a supported native platform");
+      const binary = join(packageRoot, "dist/native", target, process.platform === "win32" ? "yq.exe" : "yq");
+      assert.ok(await stat(binary).then(file => file.isFile(), () => false), "Stage the host binary with .github/release/build_native.py and rebuild the package before testing the launcher");
+    }
+    if (hideWasm !== wasmHidden) {
+      for (const path of wasmPaths) {
+        await rename(hideWasm ? path : `${path}.hidden`, hideWasm ? `${path}.hidden` : path);
+      }
+      wasmHidden = hideWasm;
+    }
+    const command = runtime === "native" ? resolve(root, process.env.YQ_NATIVE ?? `target/release/yq${process.platform === "win32" ? ".exe" : ""}`) : runtime === "bun" ? "bun" : process.execPath;
     const commandArgs = args => runtime === "native" ? args : [entry, ...args];
     const cli = (args, text = "", cwd = fixture) => run(command, commandArgs(args), text, cwd);
     // Windows pipes do not have POSIX SIGPIPE exit semantics.
