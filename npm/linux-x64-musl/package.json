@@ -1,6 +1,6 @@
 {
   "name": "yq.rs-linux-x64-musl",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Native linux-x64-musl binary for yq.rs",
   "license": "MIT AND Apache-2.0",
   "repository": {
