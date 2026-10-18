@@ -1,6 +1,6 @@
 {
   "name": "yq.rs-darwin-arm64-napi",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Node-API addon for yq.rs on darwin-arm64",
   "license": "MIT AND Apache-2.0",
   "repository": {
