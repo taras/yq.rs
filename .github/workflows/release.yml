@@ -35,11 +35,7 @@ jobs:
       - id: metadata
         shell: bash
         run: python3 .github/release/verify.py metadata
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ steps.metadata.outputs.node }}
-          package-manager-cache: false
-      - name: Build native package
+      - name: Build native binary
         shell: bash
         run: |
           rustup target add '${{ matrix.target }}'
@@ -106,31 +102,13 @@ jobs:
           pattern: native-*
           merge-multiple: true
           path: target/native-artifacts/
-      - name: Build and test installed npm package on Node and Bun
+      - name: Build npm package contents
         run: |
-          npm ci --omit=optional
+          npm ci
           cargo build --locked --release -p yq-cli
           node js/platform-test.mjs
           npm run typecheck
           npm run build
-          YQ_TEST_NATIVE_PACKAGE="$PWD/target/native-artifacts/yq.rs-linux-x64-gnu-${{ steps.metadata.outputs.version }}.tgz" YQ_TEST_NATIVE_ADDON_PACKAGE="$PWD/target/native-artifacts/yq.rs-linux-x64-gnu-napi-${{ steps.metadata.outputs.version }}.tgz" npm test
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: "1.26.0"
-          cache: false
-      - name: Check out pinned Go oracle
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: mikefarah/yq
-          ref: a814ff5166040ec745a96bddd79ee31c3a548e83
-          path: ref/yq
-          persist-credentials: false
-      - name: Compare installed CLI with Go yq on Node and Bun
-        run: |
-          (cd ref/yq && go build -o ../yq-ref .)
-          npm run test:cli
-        env:
-          GOTOOLCHAIN: local
       - name: Verify published Rust package and tests
         run: |
           cargo publish --locked --dry-run -p yq-core
@@ -142,6 +120,28 @@ jobs:
           cargo test --locked --manifest-path "$package_dir/yq-core-$version/Cargo.toml"
       - name: Assemble verified release artifacts
         run: python3 .github/release/verify.py bundle
+      - name: Test the verified npm tarball on Node and Bun
+        run: npm test
+        env:
+          YQ_PACKAGE_TARBALL: ${{ github.workspace }}/target/release-artifacts/yq.rs-${{ steps.metadata.outputs.version }}.tgz
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.0"
+          cache: false
+      - name: Check out pinned Go oracle
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mikefarah/yq
+          ref: a814ff5166040ec745a96bddd79ee31c3a548e83
+          path: ref/yq
+          persist-credentials: false
+      - name: Compare wasm, native and installed launcher CLIs with Go yq
+        run: |
+          (cd ref/yq && go build -o ../yq-ref .)
+          npm run test:cli
+        env:
+          GOTOOLCHAIN: local
+          YQ_PACKAGE_TARBALL: ${{ github.workspace }}/target/release-artifacts/yq.rs-${{ steps.metadata.outputs.version }}.tgz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-inputs-${{ github.sha }}
@@ -171,18 +171,40 @@ jobs:
         if: matrix.libc != 'musl'
         shell: bash
         run: |
-          cp target/release-artifacts/yq.wasm js/yq.wasm
-          npm ci --omit=optional --ignore-scripts
-          npm run build
+          npm ci --ignore-scripts
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
-          export YQ_TEST_NATIVE_PACKAGE="$PWD/target/release-artifacts/yq.rs-${{ matrix.id }}-$version.tgz"
-          export YQ_TEST_NATIVE_ADDON_PACKAGE="$PWD/target/release-artifacts/yq.rs-${{ matrix.id }}-napi-$version.tgz"
+          export YQ_PACKAGE_TARBALL="$PWD/target/release-artifacts/yq.rs-$version.tgz"
           node js/package-test.mjs node
       - name: Check installed packages on Alpine
         if: matrix.libc == 'musl'
         shell: bash
         run: |
-          docker run --rm -v "$PWD:/work" -w /work node:22.23.3-alpine sh .github/release/smoke_alpine.sh '${{ matrix.id }}'
+          docker run --rm -v "$PWD:/work" -w /work node:22.23.3-alpine sh .github/release/smoke_alpine.sh
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: matrix.os == 'win32'
+        with:
+          go-version: "1.26.0"
+          cache: false
+      - name: Check out pinned Go oracle for Windows parity
+        if: matrix.os == 'win32'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mikefarah/yq
+          ref: a814ff5166040ec745a96bddd79ee31c3a548e83
+          path: ref/yq
+          persist-credentials: false
+      - name: Compare Windows native and installed launcher CLIs with Go yq
+        if: matrix.os == 'win32'
+        shell: bash
+        run: |
+          (cd ref/yq && go build -o ../yq-ref.exe .)
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+          export YQ_PACKAGE_TARBALL="$PWD/target/release-artifacts/yq.rs-$version.tgz"
+          export YQ_REFERENCE="$PWD/ref/yq-ref.exe"
+          export YQ_NATIVE="$PWD/target/release-artifacts/yq-${{ matrix.id }}.exe"
+          node js/cli-test.mjs native launcher
+        env:
+          GOTOOLCHAIN: local
 
   publish:
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -194,8 +216,6 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    env:
-      CARGO_TOKEN_AVAILABLE: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,7 +244,7 @@ jobs:
           subject-path: target/release-artifacts/*
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: cargo-auth
-        if: steps.registry.outputs.cargo_exists != 'true' && env.CARGO_TOKEN_AVAILABLE != 'true'
+        if: steps.registry.outputs.cargo_exists != 'true'
       - name: Publish yq-core
         if: steps.registry.outputs.cargo_exists != 'true'
         run: |
@@ -232,17 +252,11 @@ jobs:
           cmp "target/package/yq-core-${{ needs.verify.outputs.version }}.crate" "target/release-artifacts/yq-core-${{ needs.verify.outputs.version }}.crate"
           cargo publish --locked -p yq-core
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.cargo-auth.outputs.token }}
-      - name: Publish native packages before the meta package
-        run: python3 .github/release/verify.py publish-native
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.cargo-auth.outputs.token }}
       - name: Publish npm with provenance
         if: steps.registry.outputs.npm_exists != 'true'
         run: npm publish "target/release-artifacts/${{ steps.registry.outputs.npm_file }}" --access public --provenance --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Wait for the meta package to become installable
+      - name: Wait for the npm package to become installable
         run: python3 .github/release/verify.py wait-npm
       - name: Create GitHub release and attach artifacts
         env:

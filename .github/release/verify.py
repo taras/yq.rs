@@ -9,8 +9,9 @@ import shutil
 import subprocess
 import sys
 import time
+import tarfile
 
-from native import PLATFORMS, package_metadata
+from native import PLATFORMS, binary_name, package_path, stage_binaries, collect_licenses
 import tomllib
 import urllib.error
 import urllib.parse
@@ -38,21 +39,6 @@ def metadata():
         raise SystemExit("Releases require an X.Y.Z version")
     if any(value != version for value in [npm["version"], lock["version"], lock["packages"][""]["version"]]):
         raise SystemExit("Cargo, npm and npm lockfile versions differ")
-    expected_optional = {}
-    for platform in PLATFORMS:
-        for addon in [False, True]:
-            package = package_metadata(platform, addon)
-            name = f"yq.rs-{platform['id']}{'-napi' if addon else ''}"
-            if package['name'] != name or package['version'] != version:
-                raise SystemExit(f"Native package version/name differs: {name}")
-            if package['os'] != [platform['os']] or package['cpu'] != [platform['cpu']] or package.get('libc') != ([platform['libc']] if platform.get('libc') else None):
-                raise SystemExit(f"Native package platform differs: {name}")
-            expected_optional[name] = version
-            locked = lock['packages'].get(f'node_modules/{name}', {})
-            if locked.get('version') != version or not locked.get('optional'):
-                raise SystemExit(f'Native lockfile entry differs: {name}')
-    if npm.get('optionalDependencies') != expected_optional or lock['packages'][''].get('optionalDependencies') != expected_optional:
-        raise SystemExit('Native optional dependencies must match the workspace version exactly')
     tag = os.environ.get("RELEASE_TAG", "")
     if tag and tag != f"v{version}":
         raise SystemExit(f"Tag {tag!r} must match v{version}")
@@ -76,7 +62,10 @@ def sizes():
 def bundle():
     version = metadata()["version"]
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    stage_binaries()
+    collect_licenses(ROOT / 'dist')
     packed = json.loads(subprocess.check_output(["npm", "pack", "--ignore-scripts", "--json", "--pack-destination", str(ARTIFACTS)], cwd=ROOT))[0]
+    verify_package(ARTIFACTS / packed['filename'])
     shutil.copy2(ROOT / "js/yq.wasm", ARTIFACTS / "yq.wasm")
     crate = f"yq-core-{version}.crate"
     shutil.copy2(ROOT / "target/package" / crate, ARTIFACTS / crate)
@@ -89,16 +78,19 @@ def bundle():
     if int(match[2]) + int(match[3]) != len(json.loads((fixture / "scenarios.json").read_text())):
         raise SystemExit("Conformance report does not cover the full fixture")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    native_packages = native_records(version)
-    for package in native_packages:
-        for name in [package['filename'], package['binary']]:
-            shutil.copy2(ROOT / 'target/native-artifacts' / name, ARTIFACTS / name)
-    manifest = {"native_packages": native_packages, "version": version, "commit": commit, "npm": packed["filename"], "crate": crate, "yq_reference": reference, "conformance": report, **sizes()}
+    native_binaries = native_records()
+    for binary in native_binaries:
+        shutil.copy2(ROOT / 'target/native-artifacts' / binary['binary'], ARTIFACTS / binary['binary'])
+        with tarfile.open(ARTIFACTS / packed['filename'], 'r:gz') as archive:
+            packaged = archive.extractfile('package/' + binary['package_path']).read()
+        if packaged != (ARTIFACTS / binary['binary']).read_bytes():
+            raise SystemExit(f"Packed binary differs from native build: {binary['platform']}")
+    manifest = {"native_binaries": native_binaries, "version": version, "commit": commit, "npm": packed["filename"], "crate": crate, "yq_reference": reference, "conformance": report, **sizes()}
     (ARTIFACTS / "release.json").write_text(json.dumps(manifest, indent=2) + "\n")
     npm_name = json.loads((ROOT / "package.json").read_text())["name"]
     (ARTIFACTS / "release-notes.md").write_text(f"Release v{version}\n\nGo yq fixture reference: `{reference}`.\n\n{report}.\n\nWasm: {manifest['wasm_bytes']:,} bytes; {manifest['gzip_bytes']:,} bytes gzipped.\n\nPackages: `yq-core` and `{npm_name}`, version {version}.\n")
     names = ["yq.wasm", packed["filename"], crate, "release.json", "release-notes.md"]
-    names += [name for package in native_packages for name in [package['filename'], package['binary']]]
+    names += [binary['binary'] for binary in native_binaries]
     (ARTIFACTS / "SHA256SUMS").write_text("".join(f"{hashlib.sha256((ARTIFACTS / name).read_bytes()).hexdigest()}  {name}\n" for name in names))
 
 
@@ -113,13 +105,29 @@ def registry_json(url):
         raise
 
 
-def native_records(version):
-    return [
-        {"name": f"yq.rs-{platform['id']}{'-napi' if addon else ''}",
-         "filename": f"yq.rs-{platform['id']}{'-napi' if addon else ''}-{version}.tgz",
-         "binary": f"yq-{platform['id']}{'.node' if addon else ('.exe' if platform['os'] == 'win32' else '')}"}
-        for platform in PLATFORMS for addon in [False, True]
-    ]
+def native_records():
+    return [{'platform': platform['id'], 'binary': binary_name(platform), 'package_path': package_path(platform)} for platform in PLATFORMS]
+
+
+def inspect_package(path):
+    with tarfile.open(path, 'r:gz') as archive:
+        package = json.load(archive.extractfile('package/package.json'))
+        files = [{'path': member.name.removeprefix('package/'), 'mode': member.mode, 'size': member.size} for member in archive.getmembers() if member.isfile()]
+    return {'package': package, 'files': files}
+
+
+def verify_package(path):
+    packed = inspect_package(path)
+    if packed['package'].get('optionalDependencies') or './native' in packed['package'].get('exports', {}):
+        raise SystemExit('Package must bundle CLI binaries without platform dependencies or an addon entry')
+    files = {item['path']: item for item in packed['files']}
+    for binary in native_records():
+        member = files.get(binary['package_path'])
+        if not member or not member['size']:
+            raise SystemExit(f"Missing packed native binary: {binary['package_path']}")
+        if member['mode'] & 0o777 != 0o755:
+            raise SystemExit(f"Packed native binary must have mode 0755: {binary['package_path']}")
+    return packed
 
 
 def release_manifest():
@@ -130,9 +138,9 @@ def release_manifest():
     if manifest["crate"] != f"yq-core-{version}.crate" or manifest["npm"] != expected_npm:
         raise SystemExit("Release manifest contains unexpected package filenames")
     expected_names = {"yq.wasm", expected_npm, manifest["crate"], "release.json", "release-notes.md"}
-    if manifest.get('native_packages') != native_records(version):
-        raise SystemExit('Release manifest contains unexpected native packages')
-    expected_names.update(name for package in manifest['native_packages'] for name in [package['filename'], package['binary']])
+    if manifest.get('native_binaries') != native_records():
+        raise SystemExit('Release manifest contains unexpected native binaries')
+    expected_names.update(binary['binary'] for binary in manifest['native_binaries'])
     checked = set()
     for line in (ARTIFACTS / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ")
@@ -165,8 +173,6 @@ def registries():
     npm = npm_publication(npm_name, manifest['npm'], version)
     if crate and crate["version"]["checksum"] != hashlib.sha256((ARTIFACTS / manifest["crate"]).read_bytes()).hexdigest():
         raise SystemExit("crates.io already has different bytes for this version")
-    for package in manifest['native_packages']:
-        npm_publication(package['name'], package['filename'], version)
     emit({"cargo_exists": str(bool(crate)).lower(), "npm_exists": str(bool(npm)).lower(), "npm_file": manifest["npm"]})
 
 
@@ -183,19 +189,6 @@ def wait_npm(packages, version):
         time.sleep(30)
 
 
-def publish_native():
-    manifest = release_manifest()
-    version = metadata()['version']
-    for package in manifest['native_packages']:
-        if not npm_publication(package['name'], package['filename'], version):
-            result = subprocess.run(['npm', 'publish', str(ARTIFACTS / package['filename']), '--access', 'public', '--provenance', '--ignore-scripts'], text=True, capture_output=True)
-            print(result.stdout, end='')
-            print(result.stderr, end='', file=sys.stderr)
-            if result.returncode and 'EPUBLISHCONFLICT' not in result.stderr and 'cannot publish over' not in result.stderr.lower():
-                raise SystemExit(result.returncode)
-    wait_npm(manifest['native_packages'], version)
-
-
 if __name__ == "__main__":
     command = sys.argv[1]
     if command == "metadata":
@@ -206,8 +199,10 @@ if __name__ == "__main__":
         bundle()
     elif command == "registries":
         registries()
-    elif command == "publish-native":
-        publish_native()
+    elif command == "inspect-package":
+        print(json.dumps(inspect_package(sys.argv[2])))
+    elif command == "check-package":
+        verify_package(sys.argv[2])
     elif command == "wait-npm":
         manifest = release_manifest()
         wait_npm([{'name': json.loads((ROOT / 'package.json').read_text())['name'], 'filename': manifest['npm']}], metadata()['version'])

@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { platformTarget } from "./platform.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const requested = process.argv.slice(2);
-const runtimes = requested.length === 0 ? ["node", "bun", "native"] : requested;
+const runtimes = requested.length === 0 ? ["node", "bun", "native", "launcher"] : requested;
 for (const runtime of runtimes) {
-  assert.ok(runtime === "node" || runtime === "bun" || runtime === "native", `Unsupported CLI test runtime: ${runtime}`);
+  assert.ok(["node", "bun", "native", "launcher"].includes(runtime), `Unsupported CLI test runtime: ${runtime}`);
 }
 const reference = resolve(root, process.env.YQ_REFERENCE ?? "ref/yq-ref");
-const environment = { ...process.env, NO_COLOR: "1", TERM: "dumb", YQ_CLI_TEST_NUMBER: "42", YQ_CLI_TEST_TEXT: "hello world", YQ_CLI_TEST_SPECIAL: 'quoted "braces {and}"\b\f' };
+const environment = { ...process.env, YQ_FORCE_WASM: "1", NO_COLOR: "1", TERM: "dumb", YQ_CLI_TEST_NUMBER: "42", YQ_CLI_TEST_TEXT: "hello world", YQ_CLI_TEST_SPECIAL: 'quoted "braces {and}"\b\f' };
 delete environment.FORCE_COLOR;
 const fixture = await mkdtemp(join(tmpdir(), "yq-cli-"));
 let checks = 0;
@@ -24,7 +25,16 @@ function run(command, args, input = "", cwd = fixture) {
     throw new Error(`Could not execute ${command}: ${result.error.message}`, { cause: result.error });
   }
   assert.equal(result.signal, null, `${command} terminated with ${result.signal}`);
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  // The engine uses a portable missing-file diagnostic; Go uses the Windows OS message.
+  const stderr = process.platform === "win32" ? result.stderr.replaceAll("The system cannot find the file specified.", "no such file or directory") : result.stderr;
+  return { status: result.status, stdout: result.stdout, stderr };
+}
+
+function npm(args, cwd = fixture) {
+  if (process.platform === "win32") {
+    return run(process.execPath, [join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js"), ...args], "", cwd);
+  }
+  return run("npm", args, "", cwd);
 }
 
 function runWithClosedStdout(command, args) {
@@ -51,18 +61,20 @@ function runWithClosedStdout(command, args) {
 try {
   assert.equal(run(reference, ["--version"]).status, 0, `YQ_REFERENCE must point to the pinned Go yq executable: ${reference}`);
   const cache = join(fixture, ".npm-cache");
-  const packed = JSON.parse(run("npm", ["pack", "--ignore-scripts", "--json", "--cache", cache, "--pack-destination", fixture], "", root).stdout)[0];
+  const packed = process.env.YQ_PACKAGE_TARBALL ? { filename: resolve(process.env.YQ_PACKAGE_TARBALL), files: [{ path: "dist/cli.mjs" }] } : JSON.parse(npm(["pack", "--ignore-scripts", "--json", "--cache", cache, "--pack-destination", fixture], root).stdout)[0];
   assert.ok(packed.files.some(file => file.path === "dist/cli.mjs"), "npm package must include the compiled CLI");
   await writeFile(join(fixture, "package.json"), '{"private":true,"type":"module"}\n');
-  const installed = run("npm", ["install", "--prefix", fixture, "--cache", cache, "--ignore-scripts", "--no-package-lock", "--no-audit", "--no-fund", "--offline", join(fixture, packed.filename)]);
+  const installed = npm(["install", "--prefix", fixture, "--cache", cache, "--ignore-scripts", "--no-package-lock", "--no-audit", "--no-fund", "--offline", (isAbsolute(packed.filename) ? packed.filename : join(fixture, packed.filename))]);
   assert.equal(installed.status, 0, installed.stderr);
   const packageRoot = join(fixture, "node_modules/yq.rs");
   const metadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   const bin = typeof metadata.bin === "string" ? metadata.bin : metadata.bin?.yq;
   assert.equal(typeof bin, "string", "npm package must expose a yq executable");
   const declaredEntry = isAbsolute(bin) ? bin : join(packageRoot, bin);
-  const entry = join(fixture, "node_modules/.bin/yq");
-  assert.equal((await stat(declaredEntry)).mode & 0o111, 0o111, "npm CLI must be executable");
+  const entry = process.platform === "win32" ? declaredEntry : join(fixture, "node_modules/.bin/yq");
+  if (process.platform !== "win32") {
+    assert.equal((await stat(declaredEntry)).mode & 0o111, 0o111, "npm CLI must be executable");
+  }
   const version = metadata.version;
   await mkdir(join(fixture, "data dir"));
   const files = {
@@ -186,11 +198,32 @@ try {
     ["invalid expression token", ["-n", "invalid()"]],
   ];
 
+  const wasmPaths = ["inline.js", "cli-wasm.mjs"].map(name => join(packageRoot, "dist", name));
+  let wasmHidden = false;
   for (const runtime of runtimes) {
-    const command = runtime === "native" ? resolve(root, process.env.YQ_NATIVE ?? `target/release/yq${process.platform === "win32" ? ".exe" : ""}`) : runtime === "node" ? process.execPath : runtime;
+    if (runtime === "node" || runtime === "bun") {
+      environment.YQ_FORCE_WASM = "1";
+    } else {
+      delete environment.YQ_FORCE_WASM;
+    }
+    const hideWasm = runtime === "launcher";
+    if (hideWasm) {
+      const target = platformTarget();
+      assert.ok(target, "Launcher parity requires a supported native platform");
+      const binary = join(packageRoot, "dist/native", target, process.platform === "win32" ? "yq.exe" : "yq");
+      assert.ok(await stat(binary).then(file => file.isFile(), () => false), "Stage the host binary with .github/release/build_native.py and rebuild the package before testing the launcher");
+    }
+    if (hideWasm !== wasmHidden) {
+      for (const path of wasmPaths) {
+        await rename(hideWasm ? path : `${path}.hidden`, hideWasm ? `${path}.hidden` : path);
+      }
+      wasmHidden = hideWasm;
+    }
+    const command = runtime === "native" ? resolve(root, process.env.YQ_NATIVE ?? `target/release/yq${process.platform === "win32" ? ".exe" : ""}`) : runtime === "bun" ? "bun" : process.execPath;
     const commandArgs = args => runtime === "native" ? args : [entry, ...args];
     const cli = (args, text = "", cwd = fixture) => run(command, commandArgs(args), text, cwd);
-    for (const args of [[".", "large.yml"], ["--help"]]) {
+    // Windows pipes do not have POSIX SIGPIPE exit semantics.
+    for (const args of process.platform === "win32" ? [] : [[".", "large.yml"], ["--help"]]) {
       const expected = await runWithClosedStdout(reference, args);
       assert.deepEqual(expected, { status: 141, stderr: "" }, "Go must exit silently on a broken pipe");
       assert.deepEqual(await runWithClosedStdout(command, commandArgs(args)), expected, `${runtime}: broken pipe ${args.join(" ")}`);
